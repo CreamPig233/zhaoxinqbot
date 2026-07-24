@@ -1,3 +1,10 @@
+"""Local message archive and recall marker support.
+
+The archive writes one JSON file per group message and optionally stores media
+files beside it. When a group recall notice arrives, the existing JSON record is
+updated with recall metadata instead of being removed.
+"""
+
 from __future__ import annotations
 
 import shutil
@@ -15,6 +22,8 @@ MEDIA_TYPES = {"image", "record", "video", "file"}
 
 
 class MessageArchive:
+    """Persist group message events and mark recalled messages."""
+
     def __init__(self, store: JsonStore, client: NapCatClient, download_media: bool = True):
         self.store = store
         self.client = client
@@ -22,6 +31,8 @@ class MessageArchive:
         self.index = self.store.load_message_index()
 
     async def record_group_message(self, event: dict[str, Any]) -> None:
+        """Save the raw group message event and any retrievable media files."""
+
         message_id = event.get("message_id")
         group_id = event.get("group_id")
         if message_id is None or group_id is None:
@@ -43,6 +54,8 @@ class MessageArchive:
         self.store.save_message_index(self.index)
 
     async def mark_recalled(self, event: dict[str, Any]) -> None:
+        """Append recall metadata to a message archive record."""
+
         message_id = str(event.get("message_id", ""))
         if not message_id:
             return
@@ -68,6 +81,8 @@ class MessageArchive:
         self.store.save_json(path, record)
 
     async def _archive_media(self, group_id: int, message_id: int | str, segments: Any) -> list[dict[str, Any]]:
+        """Save every supported media segment and return metadata for the JSON record."""
+
         if not isinstance(segments, list):
             return []
 
@@ -89,6 +104,8 @@ class MessageArchive:
         media_type: str,
         data: dict[str, Any],
     ) -> Path | None:
+        """Resolve and save one media segment to the local data directory."""
+
         source = await self._resolve_media_source(media_type, data)
         if not source:
             return None
@@ -109,6 +126,8 @@ class MessageArchive:
         return None
 
     async def _resolve_media_source(self, media_type: str, data: dict[str, Any]) -> str:
+        """Find a URL or local path for a OneBot media segment."""
+
         if data.get("url"):
             return str(data["url"])
         if data.get("path"):
@@ -126,6 +145,8 @@ class MessageArchive:
         return str(info.get("url") or info.get("path") or info.get("file") or "")
 
     async def _download_url(self, url: str, target: Path) -> None:
+        """Stream a remote media URL into ``target`` without loading it all at once."""
+
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=30) as resp:
                 resp.raise_for_status()

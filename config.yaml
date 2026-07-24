@@ -1,0 +1,73 @@
+# config.yaml
+# -----------------------------------------------------------------------------
+# 本文件集中管理机器人运行参数、功能开关和外部服务连接信息。
+# 所有“机器人发出去的文案”和“预设问答内容”请放到 strings.yaml。
+# 群号按需求不脱敏；如果将来填写 access_token 或 api_key，请注意仓库权限。
+
+napcat:
+  # NapCat WebUI 中启用“WebSocket 服务端/正向 WS”后填写这里。
+  ws_url: ws://127.0.0.1:3001/
+
+  # NapCat 网络配置中的鉴权 token。未设置 token 时保持空字符串。
+  access_token: ""
+
+  # WebSocket 断开后的重连等待秒数。
+  reconnect_seconds: 5
+
+groups:
+  # 招新群：新成员入群禁言、实名提示、成员进退日志都围绕该群处理。
+  recruit_group: 810192062
+
+  # 管理群：实名审核通知、批准/拒绝/取消实名命令都在该群处理。
+  admin_group: 1065588188
+
+realname:
+  # 总开关：关闭后不再要求新成员实名，也不处理实名提交；成员进退日志仍会记录。
+  enabled: true
+
+  # 开启后，一个实名信息只能绑定一个 QQ；会同时检查已通过和待审核记录。
+  one_qq_one_identity: true
+
+  # 新成员入群后禁言时长，单位秒。2592000 秒约等于 30 天。
+  mute_duration_seconds: 2592000
+
+  # 允许审核实名信息的 QQ 号列表。留空表示管理群内所有成员都能审核。
+  admin_approvers: []
+
+message_archive:
+  # 总开关：开启后记录所有群消息 JSON 副本，并支持撤回标记。
+  enabled: true
+
+  # 开启后会尽量保存图片、语音、视频、文件等媒体副本到 data/media。
+  download_media: true
+
+qa:
+  # 总开关：开启后机器人会判断群内文字消息是否命中 strings.yaml 中的预设问答。
+  enabled: true
+
+  # 机器人发出的问答回复会在该秒数后撤回，0 或负数表示不撤回。
+  recall_after_seconds: 60
+
+  # 本地相似度和大模型分类都会使用该阈值；数值越高越保守。
+  confidence_threshold: 0.72
+
+  llm:
+    # 开启后优先调用 OpenAI 兼容 Chat Completions 接口判断是否命中预设问题。
+    # 未开启、未填写 api_key 或调用失败时，会自动回退到本地相似度判断。
+    enabled: false
+
+    # OpenAI 兼容接口地址，可替换为自建网关或其他兼容服务。
+    api_url: https://api.openai.com/v1/chat/completions
+
+    # 大模型 API Key。公开仓库中请谨慎填写真实密钥。
+    api_key: ""
+
+    # 用于问题分类的小模型即可，回答文本始终来自 strings.yaml 的 preset_answers。
+    model: gpt-4o-mini
+
+    # 大模型分类请求超时时间，单位秒。
+    timeout_seconds: 20
+
+storage:
+  # 运行数据目录。实名状态、成员日志、消息副本、媒体副本都会写到这里。
+  data_dir: data

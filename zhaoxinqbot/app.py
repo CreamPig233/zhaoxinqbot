@@ -1,8 +1,15 @@
+"""Application wiring and OneBot event dispatch.
+
+This module keeps the top-level bot lifecycle small: load YAML files, create
+shared services, connect to NapCat, and route each incoming OneBot event to the
+feature module that owns it.
+"""
+
 from __future__ import annotations
 
 from typing import Any
 
-from .config import dump_config_template_if_missing, load_config
+from .config import load_config, load_strings
 from .messages import MessageArchive
 from .napcat import NapCatClient
 from .qa import QuestionAnswerer
@@ -11,9 +18,11 @@ from .storage import JsonStore
 
 
 class BotApp:
+    """Container for all long-lived services used by the bot."""
+
     def __init__(self) -> None:
-        dump_config_template_if_missing()
         self.config = load_config()
+        self.strings = load_strings()
         self.store = JsonStore(self.config.storage.data_dir)
         self.client = NapCatClient(self.config.napcat.ws_url, self.config.napcat.access_token)
         self.archive = MessageArchive(
@@ -21,20 +30,26 @@ class BotApp:
             self.client,
             download_media=self.config.message_archive.download_media,
         )
-        self.realname = RealNameAuditor(self.config, self.store, self.client)
-        self.qa = QuestionAnswerer(self.config.qa, self.client)
+        self.realname = RealNameAuditor(self.config, self.strings.realname, self.store, self.client)
+        self.qa = QuestionAnswerer(self.config.qa, self.strings.qa, self.client)
 
     async def run(self) -> None:
+        """Connect to NapCat and keep reconnecting until the process exits."""
+
         print(f"[bot] connecting to {self.config.napcat.ws_url}")
         await self.client.connect_forever(self.handle_event, self.config.napcat.reconnect_seconds)
 
     async def handle_event(self, event: dict[str, Any]) -> None:
+        """Wrap event handling so one bad event does not stop the bot."""
+
         try:
             await self._handle_event(event)
         except Exception as exc:
             print(f"[bot] event handler failed: {exc}; event={event}")
 
     async def _handle_event(self, event: dict[str, Any]) -> None:
+        """Route OneBot events to feature modules by post_type and subtype."""
+
         post_type = event.get("post_type")
 
         if post_type == "message" and event.get("message_type") == "group":
@@ -58,4 +73,6 @@ class BotApp:
 
 
 async def main() -> None:
+    """Async entry point used by ``run_bot.py``."""
+
     await BotApp().run()

@@ -1,3 +1,10 @@
+"""Minimal OneBot 11 WebSocket client for NapCat.
+
+NapCat can expose a forward WebSocket server. This client connects to that
+server, receives event frames, and sends API action frames over the same socket.
+Responses are matched back to requests through the OneBot ``echo`` field.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -13,6 +20,8 @@ EventHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class NapCatClient:
+    """Small async wrapper around NapCat's OneBot WebSocket API."""
+
     def __init__(self, ws_url: str, access_token: str = ""):
         self.ws_url = ws_url
         self.access_token = access_token
@@ -20,6 +29,8 @@ class NapCatClient:
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
     async def connect_forever(self, handler: EventHandler, reconnect_seconds: int = 5) -> None:
+        """Connect, dispatch events, and reconnect after transient failures."""
+
         headers = {}
         if self.access_token:
             headers["Authorization"] = f"Bearer {self.access_token}"
@@ -40,12 +51,15 @@ class NapCatClient:
                 await asyncio.sleep(reconnect_seconds)
             finally:
                 self._ws = None
+                # Fail all in-flight API calls so feature tasks do not wait forever.
                 for future in self._pending.values():
                     if not future.done():
                         future.set_exception(ConnectionError("NapCat websocket disconnected"))
                 self._pending.clear()
 
     async def _dispatch(self, raw: str, handler: EventHandler) -> None:
+        """Separate API responses from pushed OneBot events."""
+
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
@@ -62,6 +76,8 @@ class NapCatClient:
         asyncio.create_task(handler(payload))
 
     async def call(self, action: str, **params: Any) -> dict[str, Any]:
+        """Call a OneBot action and return its ``data`` object."""
+
         if self._ws is None:
             raise ConnectionError("NapCat websocket is not connected")
 
@@ -77,16 +93,24 @@ class NapCatClient:
         return response.get("data") or {}
 
     async def send_group_msg(self, group_id: int, message: str | list[dict[str, Any]]) -> int | str | None:
+        """Send a group message and return NapCat's message_id when provided."""
+
         data = await self.call("send_group_msg", group_id=group_id, message=message)
         return data.get("message_id")
 
     async def delete_msg(self, message_id: int | str) -> None:
+        """Recall a message by message_id."""
+
         await self.call("delete_msg", message_id=message_id)
 
     async def set_group_ban(self, group_id: int, user_id: int, duration: int) -> None:
+        """Mute or unmute a group member. A duration of 0 lifts the mute."""
+
         await self.call("set_group_ban", group_id=group_id, user_id=user_id, duration=duration)
 
     async def get_image(self, file: str = "", file_id: str = "") -> dict[str, Any]:
+        """Resolve an image segment's file identifier to path or URL metadata."""
+
         params = {}
         if file:
             params["file"] = file
@@ -95,6 +119,8 @@ class NapCatClient:
         return await self.call("get_image", **params)
 
     async def get_file(self, file: str = "", file_id: str = "") -> dict[str, Any]:
+        """Resolve a non-image media/file segment to path or URL metadata."""
+
         params = {}
         if file:
             params["file"] = file
