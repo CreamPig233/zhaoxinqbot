@@ -1,8 +1,7 @@
-"""Preset Q&A matching and short-lived group replies.
+"""预设问答匹配与短时群回复。
 
-The answer text lives in ``strings.yaml``. This module only decides whether a
-message matches one of those configured questions, sends the matching answer,
-and optionally recalls the bot's own reply after a configured delay.
+回答文本都放在 strings.yaml。本模块只判断消息是否命中某个预设问题，
+发送对应回答，并按配置在一段时间后撤回机器人自己的回复。
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ from .realname import extract_text
 
 
 class QuestionAnswerer:
-    """Classify group text messages against configured preset questions."""
+    """把群文字消息分类到配置好的预设问题。"""
 
     def __init__(self, config: QAConfig, strings: QAStrings, client: NapCatClient):
         self.config = config
@@ -28,7 +27,7 @@ class QuestionAnswerer:
         self.client = client
 
     async def on_group_message(self, event: dict[str, Any]) -> None:
-        """Reply to a group message if it matches a preset question."""
+        """当群消息命中预设问题时回复对应答案。"""
 
         if not self.config.enabled:
             return
@@ -45,7 +44,7 @@ class QuestionAnswerer:
             asyncio.create_task(self._recall_later(sent_id))
 
     async def match_question(self, text: str) -> str | None:
-        """Return the configured answer for ``text``, or ``None`` when not matched."""
+        """返回 text 命中的配置答案；未命中时返回 None。"""
 
         if self.config.llm.enabled and self.config.llm.api_key:
             answer = await self.match_question_llm(text)
@@ -54,7 +53,7 @@ class QuestionAnswerer:
         return self.match_question_builtin(text)
 
     async def match_question_llm(self, text: str) -> str | None:
-        """Use an OpenAI-compatible model to classify the text against presets."""
+        """使用 OpenAI 兼容模型把文本分类到预设问题。"""
 
         options = [
             {"index": index, "question": item.question, "aliases": item.aliases}
@@ -98,7 +97,7 @@ class QuestionAnswerer:
         return None
 
     def match_question_builtin(self, text: str) -> str | None:
-        """Fallback classifier based on string similarity and substring hits."""
+        """基于字符串相似度和子串命中的本地兜底分类器。"""
 
         normalized = normalize_text(text)
         best_score = 0.0
@@ -118,7 +117,7 @@ class QuestionAnswerer:
         return None
 
     async def _recall_later(self, message_id: int | str) -> None:
-        """Recall the bot's own answer after the configured delay."""
+        """按配置延迟撤回机器人自己的回答。"""
 
         await asyncio.sleep(self.config.recall_after_seconds)
         try:
@@ -128,6 +127,6 @@ class QuestionAnswerer:
 
 
 def normalize_text(text: str) -> str:
-    """Normalize text for simple local similarity matching."""
+    """为简单本地相似度匹配标准化文本。"""
 
     return "".join(ch for ch in text.lower().strip() if not ch.isspace())

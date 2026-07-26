@@ -1,4 +1,4 @@
-"""Command-line entry point for the NapCat QQ bot."""
+"""NapCat QQ 机器人的命令行入口。"""
 
 import asyncio
 

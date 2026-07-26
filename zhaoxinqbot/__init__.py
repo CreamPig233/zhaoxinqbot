@@ -1,3 +1,3 @@
-"""Python package for the zhaoxinqbot NapCat / OneBot implementation."""
+"""zhaoxinqbot 的 NapCat / OneBot 实现包。"""
 
 __all__ = ["app"]

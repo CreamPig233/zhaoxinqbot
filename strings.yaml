@@ -50,6 +50,15 @@ realname:
   # 自动审核接口返回 reject 时使用的默认原因。
   auto_reject_reason: "自动审核未通过"
 
+  # 外部审核函数运行超时时写入申请日志的原因。
+  auto_timeout_reason: "外部审核超时"
+
+  # 外部审核函数抛出异常时写入申请日志的原因。
+  auto_exception_reason: "外部审核异常：{error}"
+
+  # 外部审核函数返回未知状态时使用的兜底原因。
+  auto_unknown_reason: "外部审核返回未知状态：{status}"
+
   # 管理员发送拒绝命令但没有附带原因时使用的默认原因。
   manual_reject_reason: "管理员拒绝"
 

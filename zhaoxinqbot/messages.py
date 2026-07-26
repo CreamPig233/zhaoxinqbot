@@ -1,8 +1,7 @@
-"""Local message archive and recall marker support.
+"""本地消息归档与撤回标记。
 
-The archive writes one JSON file per group message and optionally stores media
-files beside it. When a group recall notice arrives, the existing JSON record is
-updated with recall metadata instead of being removed.
+每条群消息会写入一个 JSON 文件，并可选保存对应媒体文件。收到群消息撤回
+通知时，模块会更新原 JSON 记录中的撤回信息，而不是删除本地副本。
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ MEDIA_TYPES = {"image", "record", "video", "file"}
 
 
 class MessageArchive:
-    """Persist group message events and mark recalled messages."""
+    """持久化群消息事件，并标记被撤回的消息。"""
 
     def __init__(self, store: JsonStore, client: NapCatClient, download_media: bool = True):
         self.store = store
@@ -31,7 +30,7 @@ class MessageArchive:
         self.index = self.store.load_message_index()
 
     async def record_group_message(self, event: dict[str, Any]) -> None:
-        """Save the raw group message event and any retrievable media files."""
+        """保存原始群消息事件，以及能获取到的媒体文件。"""
 
         message_id = event.get("message_id")
         group_id = event.get("group_id")
@@ -54,7 +53,7 @@ class MessageArchive:
         self.store.save_message_index(self.index)
 
     async def mark_recalled(self, event: dict[str, Any]) -> None:
-        """Append recall metadata to a message archive record."""
+        """给消息归档记录追加撤回元数据。"""
 
         message_id = str(event.get("message_id", ""))
         if not message_id:
@@ -81,7 +80,7 @@ class MessageArchive:
         self.store.save_json(path, record)
 
     async def _archive_media(self, group_id: int, message_id: int | str, segments: Any) -> list[dict[str, Any]]:
-        """Save every supported media segment and return metadata for the JSON record."""
+        """保存所有支持的媒体消息段，并返回写入 JSON 的媒体元数据。"""
 
         if not isinstance(segments, list):
             return []
@@ -104,7 +103,7 @@ class MessageArchive:
         media_type: str,
         data: dict[str, Any],
     ) -> Path | None:
-        """Resolve and save one media segment to the local data directory."""
+        """解析并保存一个媒体消息段到本地数据目录。"""
 
         source = await self._resolve_media_source(media_type, data)
         if not source:
@@ -126,7 +125,7 @@ class MessageArchive:
         return None
 
     async def _resolve_media_source(self, media_type: str, data: dict[str, Any]) -> str:
-        """Find a URL or local path for a OneBot media segment."""
+        """为 OneBot 媒体消息段寻找 URL 或本地路径。"""
 
         if data.get("url"):
             return str(data["url"])
@@ -145,7 +144,7 @@ class MessageArchive:
         return str(info.get("url") or info.get("path") or info.get("file") or "")
 
     async def _download_url(self, url: str, target: Path) -> None:
-        """Stream a remote media URL into ``target`` without loading it all at once."""
+        """流式下载远程媒体 URL，避免一次性载入内存。"""
 
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=30) as resp:

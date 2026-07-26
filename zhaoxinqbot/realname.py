@@ -1,14 +1,12 @@
-"""Real-name verification workflow for the recruit group.
+"""招新群实名认证流程。
 
-This feature does three related jobs:
+本功能承担三件事：
 
-* record recruit-group joins and leaves regardless of the verification switch;
-* mute new members while verification is enabled;
-* accept private real-name submissions and let the admin group approve, reject,
-  or revoke verification records.
+* 无论实名认证开关是否开启，都记录招新群成员加入和退出。
+* 实名认证开启时，对新成员执行禁言。
+* 接收私聊实名申请，并根据外部审核文件或管理群人工审核结果流转状态。
 
-All command words and reply templates come from ``strings.yaml`` so operators
-can change copy without editing Python.
+所有命令词和回复模板都来自 strings.yaml，方便后续只改 YAML 不改代码。
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ from .storage import JsonStore, utc_now_iso
 
 
 class RealNameAuditor:
-    """Handle member tracking and real-name review state transitions."""
+    """处理成员记录和实名审核状态流转。"""
 
     def __init__(
         self,
@@ -40,7 +38,7 @@ class RealNameAuditor:
         self.client = client
 
     async def on_member_change(self, event: dict[str, Any]) -> None:
-        """Record join/leave notices and start verification for new members."""
+        """记录入群/退群通知，并为新成员启动实名流程。"""
 
         group_id = int(event.get("group_id", 0))
         if group_id != self.config.groups.recruit_group:
@@ -81,7 +79,7 @@ class RealNameAuditor:
         )
 
     async def on_private_message(self, event: dict[str, Any]) -> None:
-        """Accept private submissions that begin with the configured command."""
+        """接收以配置命令开头的私聊实名申请。"""
 
         if not self.config.realname.enabled:
             return
@@ -114,7 +112,7 @@ class RealNameAuditor:
         application = self.create_application(user_id, identity, text, event)
         data.setdefault("applications", {})[application["application_id"]] = application
         data.setdefault("active_by_user", {})[str(user_id)] = application["application_id"]
-        self.save_application_state(data, application, "auto_reviewing", "external reviewer started")
+        self.save_application_state(data, application, "auto_reviewing", "auto_reviewing")
         self.store.save_realnames(data)
         await self.client.call("send_private_msg", user_id=user_id, message=self.strings.auto_reviewing)
 
@@ -137,7 +135,7 @@ class RealNameAuditor:
             )
             return
 
-        self.save_application_state(data, application, "manual_pending", reason or "external reviewer timeout")
+        self.save_application_state(data, application, "manual_pending", reason or self.strings.auto_timeout_reason)
         data.setdefault("pending", {})[str(user_id)] = {
             **application,
             "identity": identity,
@@ -147,7 +145,7 @@ class RealNameAuditor:
         await self.notify_admins(user_id, identity, application["application_id"])
 
     async def on_admin_group_message(self, event: dict[str, Any]) -> None:
-        """Handle approve/reject/revoke commands sent in the admin group."""
+        """处理管理群发出的批准、拒绝和取消实名命令。"""
 
         if int(event.get("group_id", 0)) != self.config.groups.admin_group:
             return
@@ -180,13 +178,13 @@ class RealNameAuditor:
                 await self.revoke(target_user, user_id, "manual")
 
     async def is_verified(self, user_id: int) -> bool:
-        """Return whether a QQ already has an approved real-name record."""
+        """判断某个 QQ 是否已有通过的实名记录。"""
 
         data = self.store.load_realnames()
         return str(user_id) in data.get("verified", {})
 
     def parse_identity(self, text: str) -> dict[str, str] | None:
-        """Parse ``实名 姓名 编号 单位`` into a durable identity object."""
+        """把“实名 姓名 编号 单位”解析成可持久化的身份对象。"""
 
         parts = text.split(maxsplit=3)
         if len(parts) < 4:
@@ -201,7 +199,7 @@ class RealNameAuditor:
         application_id: str | None = None,
         reason: str = "",
     ) -> None:
-        """Approve a pending submission and lift the recruit-group mute."""
+        """批准待审核申请，并解除招新群禁言。"""
 
         data = self.store.load_realnames()
         application = self.resolve_application(data, target_user, application_id)
@@ -214,7 +212,7 @@ class RealNameAuditor:
 
         data.get("pending", {}).pop(str(target_user), None)
         data.get("active_by_user", {}).pop(str(target_user), None)
-        self.save_application_state(data, application, "approved", reason or f"{mode} approved")
+        self.save_application_state(data, application, "approved", reason or mode)
         data.setdefault("verified", {})[str(target_user)] = {
             **application,
             "approved_at": utc_now_iso(),
@@ -237,7 +235,7 @@ class RealNameAuditor:
         reason: str,
         application_id: str | None = None,
     ) -> None:
-        """Reject a pending submission and ask the user to submit again."""
+        """拒绝待审核申请，并允许用户重新提交。"""
 
         data = self.store.load_realnames()
         application = self.resolve_application(data, target_user, application_id)
@@ -273,7 +271,7 @@ class RealNameAuditor:
         )
 
     async def revoke(self, target_user: int, operator_id: int, mode: str) -> None:
-        """Move an approved record to the revoked bucket."""
+        """把已通过实名记录移入撤销分区。"""
 
         data = self.store.load_realnames()
         verified = data.get("verified", {}).pop(str(target_user), None)
@@ -296,7 +294,7 @@ class RealNameAuditor:
         )
 
     async def notify_admins(self, user_id: int, identity: dict[str, str], application_id: str) -> None:
-        """Send the admin group a review notice and index that notice ID."""
+        """向管理群发送审核通知，并记录通知消息 ID。"""
 
         msg = self.strings.review_notice.format(
             user_id=user_id,
@@ -317,7 +315,7 @@ class RealNameAuditor:
         self.store.save_realnames(data)
 
     def find_identity_owner(self, data: dict[str, Any], identity: dict[str, str]) -> str | None:
-        """Find an existing QQ that already uses the same identity tuple."""
+        """查找是否已有 QQ 使用相同实名信息。"""
 
         key = (identity["name"], identity["id"], identity["unit"])
         for bucket in ("verified", "pending"):
@@ -334,7 +332,7 @@ class RealNameAuditor:
         return None
 
     def extract_user_arg(self, text: str) -> int | None:
-        """Extract the first QQ-looking number from an admin command."""
+        """从管理员命令中提取第一个像 QQ 号的数字。"""
 
         for part in text.split():
             if part.isdigit() and len(part) >= 5:
@@ -342,7 +340,7 @@ class RealNameAuditor:
         return None
 
     def extract_reply_target(self, event: dict[str, Any]) -> int | None:
-        """Resolve a replied review notice back to the pending user's QQ."""
+        """从回复的审核通知中解析待审核用户 QQ。"""
 
         reply_id = extract_reply_id(event)
         if reply_id is None:
@@ -354,7 +352,7 @@ class RealNameAuditor:
         return None
 
     def extract_reply_application_id(self, event: dict[str, Any]) -> str | None:
-        """Resolve a replied review notice back to the exact application ID."""
+        """从回复的审核通知中解析精确申请 ID。"""
 
         reply_id = extract_reply_id(event)
         if reply_id is None:
@@ -366,7 +364,7 @@ class RealNameAuditor:
         return None
 
     def get_active_application(self, data: dict[str, Any], user_id: int) -> dict[str, Any] | None:
-        """Return the user's active application, if one is still under review."""
+        """返回用户当前仍在审核中的申请。"""
 
         application_id = data.get("active_by_user", {}).get(str(user_id))
         if not application_id:
@@ -383,7 +381,7 @@ class RealNameAuditor:
         raw_text: str,
         event: dict[str, Any],
     ) -> dict[str, Any]:
-        """Create a durable application record before any review work starts."""
+        """在任何审核工作开始前创建可持久化的申请记录。"""
 
         now = utc_now_iso()
         return {
@@ -406,7 +404,7 @@ class RealNameAuditor:
         status: str,
         detail: str = "",
     ) -> None:
-        """Update an application status and append a detailed JSONL audit record."""
+        """更新申请状态，并追加详细 JSONL 审计记录。"""
 
         now = utc_now_iso()
         application["status"] = status
@@ -434,7 +432,7 @@ class RealNameAuditor:
         target_user: int,
         application_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Find the application being approved or rejected."""
+        """查找正在被批准或拒绝的实名申请。"""
 
         if application_id:
             return data.get("applications", {}).get(application_id)
@@ -447,7 +445,7 @@ class RealNameAuditor:
         return None
 
     async def run_external_review(self, application: dict[str, Any]) -> tuple[str, str]:
-        """Call the configured external Python review file and normalize its result."""
+        """调用配置的外部 Python 审核文件，并规范化返回值。"""
 
         async def call_reviewer() -> Any:
             reviewer = self.load_external_reviewer()
@@ -463,13 +461,13 @@ class RealNameAuditor:
                 timeout=self.config.realname.auto_review.timeout_seconds,
             )
         except asyncio.TimeoutError:
-            return "timeout", "external reviewer timed out"
+            return "timeout", self.strings.auto_timeout_reason
         except Exception as exc:
-            return "timeout", f"external reviewer failed: {exc}"
-        return normalize_review_result(result)
+            return "timeout", self.strings.auto_exception_reason.format(error=exc)
+        return normalize_review_result(result, self.strings.auto_unknown_reason)
 
     def load_external_reviewer(self) -> Any:
-        """Load the configured review function from a Python file path."""
+        """从配置的 Python 文件路径加载审核函数。"""
 
         path = self.config.realname.auto_review.module_path
         if not path.is_absolute():
@@ -489,7 +487,7 @@ class RealNameAuditor:
 
 
 def extract_text(message: Any) -> str:
-    """Collect text segments from OneBot message arrays."""
+    """从 OneBot 消息数组中提取所有文本消息段。"""
 
     if isinstance(message, str):
         return message
@@ -503,7 +501,7 @@ def extract_text(message: Any) -> str:
 
 
 def extract_reply_id(event: dict[str, Any]) -> Any:
-    """Extract a OneBot reply segment ID from a group message event."""
+    """从群消息事件中提取 OneBot reply 消息段 ID。"""
 
     message = event.get("message")
     if not isinstance(message, list):
@@ -515,7 +513,7 @@ def extract_reply_id(event: dict[str, Any]) -> Any:
 
 
 def strip_command_and_user(text: str, command: str) -> str:
-    """Remove an admin command and optional QQ argument, leaving the reason text."""
+    """移除管理员命令和可选 QQ 参数，留下原因文本。"""
 
     rest = text[len(command) :].strip()
     parts = rest.split(maxsplit=1)
@@ -524,8 +522,8 @@ def strip_command_and_user(text: str, command: str) -> str:
     return rest
 
 
-def normalize_review_result(result: Any) -> tuple[str, str]:
-    """Normalize external reviewer output to approve/reject/timeout plus reason."""
+def normalize_review_result(result: Any, unknown_reason_template: str) -> tuple[str, str]:
+    """把外部审核返回值规范化为内部状态码和原因。"""
 
     reason = ""
     status = result
@@ -553,7 +551,7 @@ def normalize_review_result(result: Any) -> tuple[str, str]:
         "timed_out": "timeout",
         "超时": "timeout",
     }
-    return mapping.get(normalized, "timeout"), reason or f"external reviewer returned {status!r}"
+    return mapping.get(normalized, "timeout"), reason or unknown_reason_template.format(status=status)
 
 
 ACTIVE_APPLICATION_STATUSES = {"created", "auto_reviewing", "manual_pending"}

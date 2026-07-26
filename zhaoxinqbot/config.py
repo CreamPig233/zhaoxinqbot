@@ -1,15 +1,11 @@
-"""Load runtime configuration and user-facing text from YAML files.
+"""从 YAML 文件加载运行配置和对外文案。
 
-The project intentionally separates two kinds of editable data:
+项目刻意把两类可编辑数据分开：
 
-* ``config.yaml`` contains behavior switches, group IDs, storage locations, and
-  external service credentials.
-* ``strings.yaml`` contains bot commands, reply templates, review templates,
-  LLM prompts, and preset Q&A text.
+* config.yaml 保存功能开关、群号、存储路径和外部服务凭据。
+* strings.yaml 保存命令词、回复模板、审核通知模板、LLM 提示词和预设问答。
 
-Keeping these layers separate lets operators tune behavior without hunting
-through Python files, and lets copy be changed without touching credentials or
-runtime switches.
+这样改运行参数不需要找 Python 文件，改文案也不会碰到凭据和功能开关。
 """
 
 from __future__ import annotations
@@ -23,7 +19,7 @@ import yaml
 
 @dataclass(frozen=True)
 class NapCatConfig:
-    """Connection settings for NapCat's forward WebSocket server."""
+    """NapCat 正向 WebSocket 服务端连接配置。"""
 
     ws_url: str
     access_token: str = ""
@@ -32,7 +28,7 @@ class NapCatConfig:
 
 @dataclass(frozen=True)
 class GroupConfig:
-    """QQ group IDs that define where each feature is active."""
+    """定义各功能生效范围的 QQ 群号。"""
 
     recruit_group: int
     admin_group: int
@@ -40,7 +36,7 @@ class GroupConfig:
 
 @dataclass(frozen=True)
 class AutoReviewConfig:
-    """Settings for the external Python real-name review hook."""
+    """外部 Python 实名审核钩子的配置。"""
 
     module_path: Path
     function_name: str = "review_application"
@@ -49,7 +45,7 @@ class AutoReviewConfig:
 
 @dataclass(frozen=True)
 class RealNameConfig:
-    """Runtime switches for the real-name verification workflow."""
+    """实名认证流程的运行开关。"""
 
     enabled: bool = True
     one_qq_one_identity: bool = True
@@ -62,7 +58,7 @@ class RealNameConfig:
 
 @dataclass(frozen=True)
 class MessageArchiveConfig:
-    """Runtime switches for message and media archiving."""
+    """消息和媒体归档功能的运行开关。"""
 
     enabled: bool = True
     download_media: bool = True
@@ -70,7 +66,7 @@ class MessageArchiveConfig:
 
 @dataclass(frozen=True)
 class LLMConfig:
-    """OpenAI-compatible Chat Completions settings for Q&A classification."""
+    """用于问答分类的 OpenAI 兼容 Chat Completions 配置。"""
 
     enabled: bool = False
     api_url: str = "https://api.openai.com/v1/chat/completions"
@@ -81,7 +77,7 @@ class LLMConfig:
 
 @dataclass(frozen=True)
 class QAConfig:
-    """Runtime switches for preset Q&A matching and reply recall."""
+    """预设问答匹配和回复撤回的运行开关。"""
 
     enabled: bool = True
     recall_after_seconds: int = 60
@@ -91,14 +87,14 @@ class QAConfig:
 
 @dataclass(frozen=True)
 class StorageConfig:
-    """Filesystem locations for all durable runtime data."""
+    """长期运行数据的文件系统位置。"""
 
     data_dir: Path
 
 
 @dataclass(frozen=True)
 class BotConfig:
-    """All non-copy runtime settings loaded from ``config.yaml``."""
+    """从 config.yaml 读取的所有非文案运行配置。"""
 
     napcat: NapCatConfig
     groups: GroupConfig
@@ -110,7 +106,7 @@ class BotConfig:
 
 @dataclass(frozen=True)
 class RealNameStrings:
-    """Commands and message templates used by real-name verification."""
+    """实名认证功能使用的命令词和消息模板。"""
 
     submit_command: str
     approve_command: str
@@ -126,6 +122,9 @@ class RealNameStrings:
     submitted: str
     manual_handoff: str
     auto_reject_reason: str
+    auto_timeout_reason: str
+    auto_exception_reason: str
+    auto_unknown_reason: str
     manual_reject_reason: str
     no_pending: str
     approved_admin: str
@@ -139,7 +138,7 @@ class RealNameStrings:
 
 @dataclass(frozen=True)
 class PresetAnswer:
-    """A single configured Q&A item used by local and LLM classifiers."""
+    """供本地分类器和 LLM 分类器使用的一条预设问答。"""
 
     question: str
     answer: str
@@ -148,7 +147,7 @@ class PresetAnswer:
 
 @dataclass(frozen=True)
 class QAStrings:
-    """Prompt text and preset Q&A content loaded from ``strings.yaml``."""
+    """从 strings.yaml 读取的提示词和预设问答内容。"""
 
     llm_system_prompt: str
     llm_user_prompt: str
@@ -157,14 +156,14 @@ class QAStrings:
 
 @dataclass(frozen=True)
 class BotStrings:
-    """All user-facing copy and command words loaded from ``strings.yaml``."""
+    """从 strings.yaml 读取的所有对外文案和命令词。"""
 
     realname: RealNameStrings
     qa: QAStrings
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
-    """Read a YAML mapping and fail early if the root value is not a mapping."""
+    """读取 YAML 映射；如果根节点不是映射则提前报错。"""
 
     config_path = Path(path)
     if not config_path.exists():
@@ -177,7 +176,7 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
 
 
 def load_config(path: str | Path = "config.yaml") -> BotConfig:
-    """Load runtime options from ``config.yaml``."""
+    """从 config.yaml 加载运行配置。"""
 
     raw = load_yaml(path)
     napcat = raw.get("napcat", {}) or {}
@@ -230,7 +229,7 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
 
 
 def load_strings(path: str | Path = "strings.yaml") -> BotStrings:
-    """Load commands, reply templates, and preset Q&A text from ``strings.yaml``."""
+    """从 strings.yaml 加载命令词、回复模板和预设问答。"""
 
     raw = load_yaml(path)
     realname = raw.get("realname", {}) or {}
@@ -252,6 +251,9 @@ def load_strings(path: str | Path = "strings.yaml") -> BotStrings:
             submitted=str(realname["submitted"]),
             manual_handoff=str(realname["manual_handoff"]),
             auto_reject_reason=str(realname["auto_reject_reason"]),
+            auto_timeout_reason=str(realname["auto_timeout_reason"]),
+            auto_exception_reason=str(realname["auto_exception_reason"]),
+            auto_unknown_reason=str(realname["auto_unknown_reason"]),
             manual_reject_reason=str(realname["manual_reject_reason"]),
             no_pending=str(realname["no_pending"]),
             approved_admin=str(realname["approved_admin"]),

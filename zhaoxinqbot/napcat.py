@@ -1,8 +1,7 @@
-"""Minimal OneBot 11 WebSocket client for NapCat.
+"""用于 NapCat 的轻量 OneBot 11 WebSocket 客户端。
 
-NapCat can expose a forward WebSocket server. This client connects to that
-server, receives event frames, and sends API action frames over the same socket.
-Responses are matched back to requests through the OneBot ``echo`` field.
+NapCat 可以开启正向 WebSocket 服务端。本客户端连接该服务端，在同一条
+连接上接收事件帧并发送 API 调用帧，再通过 OneBot 的 echo 字段匹配响应。
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ EventHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class NapCatClient:
-    """Small async wrapper around NapCat's OneBot WebSocket API."""
+    """NapCat OneBot WebSocket API 的异步封装。"""
 
     def __init__(self, ws_url: str, access_token: str = ""):
         self.ws_url = ws_url
@@ -29,7 +28,7 @@ class NapCatClient:
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
     async def connect_forever(self, handler: EventHandler, reconnect_seconds: int = 5) -> None:
-        """Connect, dispatch events, and reconnect after transient failures."""
+        """连接、分发事件，并在临时故障后重连。"""
 
         headers = {}
         if self.access_token:
@@ -51,14 +50,14 @@ class NapCatClient:
                 await asyncio.sleep(reconnect_seconds)
             finally:
                 self._ws = None
-                # Fail all in-flight API calls so feature tasks do not wait forever.
+                # 断线时让所有未完成 API 调用失败，避免功能任务一直等待。
                 for future in self._pending.values():
                     if not future.done():
                         future.set_exception(ConnectionError("NapCat websocket disconnected"))
                 self._pending.clear()
 
     async def _dispatch(self, raw: str, handler: EventHandler) -> None:
-        """Separate API responses from pushed OneBot events."""
+        """区分 API 响应和 NapCat 主动推送的 OneBot 事件。"""
 
         try:
             payload = json.loads(raw)
@@ -76,7 +75,7 @@ class NapCatClient:
         asyncio.create_task(handler(payload))
 
     async def call(self, action: str, **params: Any) -> dict[str, Any]:
-        """Call a OneBot action and return its ``data`` object."""
+        """调用一个 OneBot 动作，并返回响应中的 data 对象。"""
 
         if self._ws is None:
             raise ConnectionError("NapCat websocket is not connected")
@@ -93,23 +92,23 @@ class NapCatClient:
         return response.get("data") or {}
 
     async def send_group_msg(self, group_id: int, message: str | list[dict[str, Any]]) -> int | str | None:
-        """Send a group message and return NapCat's message_id when provided."""
+        """发送群消息，并在 NapCat 返回时取出 message_id。"""
 
         data = await self.call("send_group_msg", group_id=group_id, message=message)
         return data.get("message_id")
 
     async def delete_msg(self, message_id: int | str) -> None:
-        """Recall a message by message_id."""
+        """按 message_id 撤回消息。"""
 
         await self.call("delete_msg", message_id=message_id)
 
     async def set_group_ban(self, group_id: int, user_id: int, duration: int) -> None:
-        """Mute or unmute a group member. A duration of 0 lifts the mute."""
+        """禁言或解除禁言群成员；duration 为 0 表示解除禁言。"""
 
         await self.call("set_group_ban", group_id=group_id, user_id=user_id, duration=duration)
 
     async def get_image(self, file: str = "", file_id: str = "") -> dict[str, Any]:
-        """Resolve an image segment's file identifier to path or URL metadata."""
+        """把图片消息段里的文件标识解析为路径或 URL 元数据。"""
 
         params = {}
         if file:
@@ -119,7 +118,7 @@ class NapCatClient:
         return await self.call("get_image", **params)
 
     async def get_file(self, file: str = "", file_id: str = "") -> dict[str, Any]:
-        """Resolve a non-image media/file segment to path or URL metadata."""
+        """把非图片媒体/文件消息段解析为路径或 URL 元数据。"""
 
         params = {}
         if file:

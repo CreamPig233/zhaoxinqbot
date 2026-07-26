@@ -1,8 +1,7 @@
-"""Application wiring and OneBot event dispatch.
+"""应用装配与 OneBot 事件分发。
 
-This module keeps the top-level bot lifecycle small: load YAML files, create
-shared services, connect to NapCat, and route each incoming OneBot event to the
-feature module that owns it.
+本模块只负责加载 YAML、创建共享服务、连接 NapCat，并把收到的 OneBot
+事件转交给对应功能模块处理。
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from .storage import JsonStore
 
 
 class BotApp:
-    """Container for all long-lived services used by the bot."""
+    """机器人运行期间长期持有的服务容器。"""
 
     def __init__(self) -> None:
         self.config = load_config()
@@ -34,13 +33,13 @@ class BotApp:
         self.qa = QuestionAnswerer(self.config.qa, self.strings.qa, self.client)
 
     async def run(self) -> None:
-        """Connect to NapCat and keep reconnecting until the process exits."""
+        """连接 NapCat，并在进程退出前持续自动重连。"""
 
         print(f"[bot] connecting to {self.config.napcat.ws_url}")
         await self.client.connect_forever(self.handle_event, self.config.napcat.reconnect_seconds)
 
     async def handle_event(self, event: dict[str, Any]) -> None:
-        """Wrap event handling so one bad event does not stop the bot."""
+        """包住事件处理，避免单个坏事件导致机器人退出。"""
 
         try:
             await self._handle_event(event)
@@ -48,7 +47,7 @@ class BotApp:
             print(f"[bot] event handler failed: {exc}; event={event}")
 
     async def _handle_event(self, event: dict[str, Any]) -> None:
-        """Route OneBot events to feature modules by post_type and subtype."""
+        """按 post_type 和子类型把 OneBot 事件路由到功能模块。"""
 
         post_type = event.get("post_type")
 
@@ -73,6 +72,6 @@ class BotApp:
 
 
 async def main() -> None:
-    """Async entry point used by ``run_bot.py``."""
+    """供 run_bot.py 调用的异步入口。"""
 
     await BotApp().run()
