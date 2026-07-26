@@ -34,6 +34,17 @@ realname:
   # 允许审核实名信息的 QQ 号列表。留空表示管理群内所有成员都能审核。
   admin_approvers: []
 
+  auto_review:
+    # 外部实名审核 Python 文件路径。该文件由你自行实现，机器人只负责调用。
+    module_path: realname_reviewer.py
+
+    # 外部审核文件中负责审核的函数名。
+    # 函数可同步或异步，接收一个申请字典，返回 approve/reject/timeout 或 通过/拒绝/超时。
+    function_name: review_application
+
+    # 调用外部审核函数的最长等待时间，单位秒。超时会转人工审核。
+    timeout_seconds: 30
+
 message_archive:
   # 总开关：开启后记录所有群消息 JSON 副本，并支持撤回标记。
   enabled: true

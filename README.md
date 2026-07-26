@@ -20,10 +20,14 @@
 1. 机器人立即对新成员执行群禁言。
 2. 机器人在招新群 @ 新成员，并提示其私聊机器人提交实名信息。
 3. 用户私聊机器人发送实名信息，例如：`实名 张三 2026001 计算机学院`。
-4. 机器人将实名信息推送到管理群，生成一条待审核通知。
-5. 管理群内审核人可以批准或拒绝。
-6. 批准后，机器人解除该用户在招新群的禁言，并私聊通知审核通过。
-7. 拒绝后，机器人私聊通知用户重新提交实名信息和拒绝原因。
+4. 机器人立刻创建一条实名申请记录，并将状态设为 `auto_reviewing`。
+5. 机器人把申请信息交给 `config.yaml` 指定的外部 Python 审核文件处理。
+6. 外部审核文件返回通过时，机器人立即解除该用户在招新群的禁言，并记录为通过。
+7. 外部审核文件返回拒绝时，机器人保持禁言，私聊告知用户拒绝原因，并允许用户重新提交。
+8. 外部审核文件返回超时或调用超时时，机器人私聊提示“移交管理员人工审核”，并把申请发送到管理群。
+9. 管理群内审核人可以批准或拒绝人工审核申请。
+
+在 `auto_reviewing` 或 `manual_pending` 状态期间，同一个用户不能重复提交实名申请。机器人会私聊提示其等待当前审核完成，避免多份申请互相覆盖。
 
 管理群支持的实名审核命令都配置在 `strings.yaml`：
 
@@ -36,17 +40,28 @@
 - 回复 `批准`
 - 回复 `拒绝 原因`
 
+外部审核文件默认为 [realname_reviewer.py](F:/zhaoxinqbot/realname_reviewer.py)。该文件中的 `review_application(application)` 由你自行实现，机器人只负责调用和处理返回状态。支持返回：
+
+- `"approve"` 或 `"通过"`
+- `"reject"` 或 `"拒绝"`
+- `"timeout"` 或 `"超时"`
+- `{"status": "reject", "reason": "原因"}`
+
 实名认证状态会保存在 `data/realname.json`，包括：
 
 - `pending`：待审核记录
 - `verified`：已通过记录
 - `rejected`：被拒绝记录
 - `revoked`：被手动取消的实名记录
+- `applications`：每一次实名申请的完整记录
+- `active_by_user`：用户当前正在审核中的申请索引
 - `review_messages`：管理群审核通知消息 ID 与用户 QQ 的映射
+
+每一次申请的状态变化还会追加写入 `data/realname_applications.jsonl`，其中包含申请 ID、发起用户、发起时间、提交的实名信息、状态、是否通过、状态说明等字段，方便审计和后续统计。
 
 当前保留的扩展点：
 
-- 自动实名审核：实现 `RealNameAuditor.auto_review()`，返回 `"approve"`、`"reject"` 或 `None`
+- 自动实名审核：实现 `realname_reviewer.py` 中的 `review_application(application)`
 - 一人一实名：通过 `config.yaml` 的 `realname.one_qq_one_identity` 开关控制
 - 手动取消实名：管理群发送 `取消实名 QQ号`
 - 实名功能总开关：通过 `config.yaml` 的 `realname.enabled` 控制
@@ -127,6 +142,7 @@ qa:
 - 实名功能开关
 - 禁言时长
 - 审核人 QQ 白名单
+- 外部实名审核 Python 文件路径、函数名和超时时间
 - 消息归档开关
 - 是否下载媒体
 - 问答撤回时间
@@ -183,6 +199,7 @@ python run_bot.py
 运行时数据默认写入 `data/`，该目录已被 `.gitignore` 忽略。
 
 - `data/realname.json`：实名审核状态
+- `data/realname_applications.jsonl`：每一次实名申请和状态流转的详细日志
 - `data/membership_events.jsonl`：招新群成员加入/退出日志
 - `data/message_index.json`：消息 ID 到本地副本路径的索引
 - `data/messages/<群号>/<消息ID>.json`：群消息 JSON 副本
@@ -200,7 +217,7 @@ python run_bot.py
 
 ## 扩展建议
 
-自动实名审核可以从 `zhaoxinqbot/realname.py` 的 `auto_review()` 开始扩展，例如接入名单数据库、学号校验接口或 OCR。
+自动实名审核可以从 [realname_reviewer.py](F:/zhaoxinqbot/realname_reviewer.py) 的 `review_application()` 开始扩展，例如接入名单数据库、学号校验接口或 OCR。
 
 问答能力可以从 `zhaoxinqbot/qa.py` 的 `match_question()` 扩展，例如改成向量检索、多轮问答或更复杂的权限判断。
 

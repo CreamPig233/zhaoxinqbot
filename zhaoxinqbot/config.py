@@ -39,6 +39,15 @@ class GroupConfig:
 
 
 @dataclass(frozen=True)
+class AutoReviewConfig:
+    """Settings for the external Python real-name review hook."""
+
+    module_path: Path
+    function_name: str = "review_application"
+    timeout_seconds: int = 30
+
+
+@dataclass(frozen=True)
 class RealNameConfig:
     """Runtime switches for the real-name verification workflow."""
 
@@ -46,6 +55,9 @@ class RealNameConfig:
     one_qq_one_identity: bool = True
     mute_duration_seconds: int = 30 * 24 * 60 * 60
     admin_approvers: set[int] = field(default_factory=set)
+    auto_review: AutoReviewConfig = field(
+        default_factory=lambda: AutoReviewConfig(module_path=Path("realname_reviewer.py"))
+    )
 
 
 @dataclass(frozen=True)
@@ -109,7 +121,10 @@ class RealNameStrings:
     resubmit_prompt: str
     invalid_format: str
     duplicate_identity: str
+    duplicate_active_application: str
+    auto_reviewing: str
     submitted: str
+    manual_handoff: str
     auto_reject_reason: str
     manual_reject_reason: str
     no_pending: str
@@ -188,6 +203,11 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
             one_qq_one_identity=bool(realname.get("one_qq_one_identity", True)),
             mute_duration_seconds=int(realname.get("mute_duration_seconds", 30 * 24 * 60 * 60)),
             admin_approvers={int(x) for x in realname.get("admin_approvers", [])},
+            auto_review=AutoReviewConfig(
+                module_path=Path((realname.get("auto_review") or {}).get("module_path", "realname_reviewer.py")),
+                function_name=str((realname.get("auto_review") or {}).get("function_name", "review_application")),
+                timeout_seconds=int((realname.get("auto_review") or {}).get("timeout_seconds", 30)),
+            ),
         ),
         message_archive=MessageArchiveConfig(
             enabled=bool(archive.get("enabled", True)),
@@ -227,7 +247,10 @@ def load_strings(path: str | Path = "strings.yaml") -> BotStrings:
             resubmit_prompt=str(realname["resubmit_prompt"]),
             invalid_format=str(realname["invalid_format"]),
             duplicate_identity=str(realname["duplicate_identity"]),
+            duplicate_active_application=str(realname["duplicate_active_application"]),
+            auto_reviewing=str(realname["auto_reviewing"]),
             submitted=str(realname["submitted"]),
+            manual_handoff=str(realname["manual_handoff"]),
             auto_reject_reason=str(realname["auto_reject_reason"]),
             manual_reject_reason=str(realname["manual_reject_reason"]),
             no_pending=str(realname["no_pending"]),

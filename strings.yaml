@@ -35,8 +35,17 @@ realname:
   # 一人一实名开关开启时，发现该实名信息已被其他 QQ 使用的提示。
   duplicate_identity: "该实名信息已被其他 QQ 绑定，请联系管理员处理。"
 
+  # 用户已有申请处于自动审核或人工审核期间时，拒绝重复提交的提示。
+  duplicate_active_application: "你已有实名申请正在审核中，请等待当前审核完成后再提交。"
+
+  # 用户提交后，外部 Python 审核文件正在处理时的提示。
+  auto_reviewing: "实名信息已收到，正在自动审核，请稍候。"
+
   # 用户提交实名信息后收到的确认消息。
   submitted: "实名信息已提交，请等待管理员审核。"
+
+  # 外部审核文件返回超时或调用超时时，私聊提示用户。
+  manual_handoff: "移交管理员人工审核"
 
   # 自动审核接口返回 reject 时使用的默认原因。
   auto_reject_reason: "自动审核未通过"
@@ -68,6 +77,7 @@ realname:
   # 有新实名信息待审核时，发到管理群的通知模板。
   review_notice: |
     实名审核待处理
+    申请ID：{application_id}
     QQ：{user_id}
     姓名：{name}
     编号：{identity_id}

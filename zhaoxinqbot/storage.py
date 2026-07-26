@@ -29,6 +29,7 @@ class JsonStore:
         (self.data_dir / "messages").mkdir(exist_ok=True)
         (self.data_dir / "media").mkdir(exist_ok=True)
         self.realname_path = self.data_dir / "realname.json"
+        self.realname_applications_path = self.data_dir / "realname_applications.jsonl"
         self.membership_path = self.data_dir / "membership_events.jsonl"
         self.message_index_path = self.data_dir / "message_index.json"
 
@@ -63,7 +64,15 @@ class JsonStore:
 
         return self.load_json(
             self.realname_path,
-            {"verified": {}, "pending": {}, "rejected": {}, "revoked": {}},
+            {
+                "verified": {},
+                "pending": {},
+                "rejected": {},
+                "revoked": {},
+                "applications": {},
+                "active_by_user": {},
+                "review_messages": {},
+            },
         )
 
     def save_realnames(self, data: dict[str, Any]) -> None:
