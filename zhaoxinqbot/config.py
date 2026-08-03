@@ -125,6 +125,7 @@ class RealNameStrings:
     auto_timeout_reason: str
     auto_exception_reason: str
     auto_unknown_reason: str
+    left_group_cancel_reason: str
     manual_reject_reason: str
     no_pending: str
     approved_admin: str
@@ -254,6 +255,7 @@ def load_strings(path: str | Path = "strings.yaml") -> BotStrings:
             auto_timeout_reason=str(realname["auto_timeout_reason"]),
             auto_exception_reason=str(realname["auto_exception_reason"]),
             auto_unknown_reason=str(realname["auto_unknown_reason"]),
+            left_group_cancel_reason=str(realname["left_group_cancel_reason"]),
             manual_reject_reason=str(realname["manual_reject_reason"]),
             no_pending=str(realname["no_pending"]),
             approved_admin=str(realname["approved_admin"]),

@@ -36,6 +36,7 @@ class RealNameAuditor:
         self.strings = strings
         self.store = store
         self.client = client
+        self._application_locks: dict[int, asyncio.Lock] = {}
 
     async def on_member_change(self, event: dict[str, Any]) -> None:
         """记录入群/退群通知，并为新成员启动实名流程。"""
@@ -57,6 +58,10 @@ class RealNameAuditor:
                 "raw_event": event,
             },
         )
+
+        if event.get("notice_type") == "group_decrease":
+            self.cancel_active_application_for_leave(int(event.get("user_id", 0)))
+            return
 
         if event.get("notice_type") != "group_increase" or not self.config.realname.enabled:
             return
@@ -94,6 +99,27 @@ class RealNameAuditor:
             await self.client.call("send_private_msg", user_id=user_id, message=self.strings.invalid_format)
             return
 
+        lock = self.get_application_lock(user_id)
+        if lock.locked():
+            await self.client.call(
+                "send_private_msg",
+                user_id=user_id,
+                message=self.strings.duplicate_active_application,
+            )
+            return
+
+        async with lock:
+            await self.handle_realname_submission(user_id, identity, text, event)
+
+    async def handle_realname_submission(
+        self,
+        user_id: int,
+        identity: dict[str, str],
+        text: str,
+        event: dict[str, Any],
+    ) -> None:
+        """在单用户锁内创建并推进一次实名申请，避免并发重复提交。"""
+
         data = self.store.load_realnames()
         if self.get_active_application(data, user_id):
             await self.client.call(
@@ -120,6 +146,8 @@ class RealNameAuditor:
         data = self.store.load_realnames()
         application = data.get("applications", {}).get(application["application_id"])
         if not application:
+            return
+        if application.get("status") != "auto_reviewing":
             return
 
         if decision == "approve":
@@ -374,6 +402,30 @@ class RealNameAuditor:
             return application
         return None
 
+    def get_application_lock(self, user_id: int) -> asyncio.Lock:
+        """返回某个用户专属的实名申请锁。"""
+
+        lock = self._application_locks.get(user_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._application_locks[user_id] = lock
+        return lock
+
+    def cancel_active_application_for_leave(self, user_id: int) -> None:
+        """用户退群时取消仍在处理中的实名申请。"""
+
+        if not user_id:
+            return
+        data = self.store.load_realnames()
+        application = self.get_active_application(data, user_id)
+        if not application:
+            return
+
+        data.get("pending", {}).pop(str(user_id), None)
+        data.get("active_by_user", {}).pop(str(user_id), None)
+        self.save_application_state(data, application, "cancelled_by_leave", self.strings.left_group_cancel_reason)
+        self.store.save_realnames(data)
+
     def create_application(
         self,
         user_id: int,
@@ -435,13 +487,24 @@ class RealNameAuditor:
         """查找正在被批准或拒绝的实名申请。"""
 
         if application_id:
-            return data.get("applications", {}).get(application_id)
+            application = data.get("applications", {}).get(application_id)
+            if (
+                application
+                and int(application.get("user_id", 0)) == target_user
+                and application.get("status") in ACTIVE_APPLICATION_STATUSES
+            ):
+                return application
+            return None
         active_id = data.get("active_by_user", {}).get(str(target_user))
         if active_id:
-            return data.get("applications", {}).get(active_id)
+            application = data.get("applications", {}).get(active_id)
+            if application and application.get("status") in ACTIVE_APPLICATION_STATUSES:
+                return application
         pending = data.get("pending", {}).get(str(target_user))
         if pending and pending.get("application_id"):
-            return data.get("applications", {}).get(pending["application_id"], pending)
+            application = data.get("applications", {}).get(pending["application_id"], pending)
+            if application and application.get("status") in ACTIVE_APPLICATION_STATUSES:
+                return application
         return None
 
     async def run_external_review(self, application: dict[str, Any]) -> tuple[str, str]:

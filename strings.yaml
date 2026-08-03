@@ -59,6 +59,9 @@ realname:
   # 外部审核函数返回未知状态时使用的兜底原因。
   auto_unknown_reason: "外部审核返回未知状态：{status}"
 
+  # 用户在审核完成前退群时，写入申请日志的取消原因。
+  left_group_cancel_reason: "用户退群，实名申请自动取消"
+
   # 管理员发送拒绝命令但没有附带原因时使用的默认原因。
   manual_reject_reason: "管理员拒绝"
 

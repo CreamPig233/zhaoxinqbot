@@ -27,7 +27,9 @@
 8. 外部审核文件返回超时或调用超时时，机器人私聊提示“移交管理员人工审核”，并把申请发送到管理群。
 9. 管理群内审核人可以批准或拒绝人工审核申请。
 
-在 `auto_reviewing` 或 `manual_pending` 状态期间，同一个用户不能重复提交实名申请。机器人会私聊提示其等待当前审核完成，避免多份申请互相覆盖。
+在 `auto_reviewing` 或 `manual_pending` 状态期间，同一个用户不能重复提交实名申请。机器人会私聊提示其等待当前审核完成；程序还会使用按 QQ 号划分的异步锁，避免并发消息在检查和创建申请之间产生竞态。
+
+如果用户在自动审核或人工审核完成前退群，当前申请会记录为 `cancelled_by_leave` 并从待审核索引移除。之后即使外部审核器返回迟到结果，也不会重新解除禁言或写入通过记录。
 
 管理群支持的实名审核命令都配置在 `strings.yaml`：
 
@@ -40,7 +42,7 @@
 - 回复 `批准`
 - 回复 `拒绝 原因`
 
-外部审核文件默认为 [realname_reviewer.py](F:/zhaoxinqbot/realname_reviewer.py)。该文件中的 `review_application(application)` 由你自行实现，机器人只负责调用和处理返回状态。支持返回：
+外部审核文件默认为 [realname_reviewer.py](F:/zhaoxinqbot/realname_reviewer.py)。首次使用时，可以复制 [realname_reviewer.example.py](F:/zhaoxinqbot/realname_reviewer.example.py) 创建本地审核文件。`realname_reviewer.py` 已加入 `.gitignore`，适合放置本地审核逻辑、名单或接口密钥。该文件中的 `review_application(application)` 由你自行实现，机器人只负责调用和处理返回状态。支持返回：
 
 - `"approve"` 或 `"通过"`
 - `"reject"` 或 `"拒绝"`
@@ -53,7 +55,7 @@
 - `verified`：已通过记录
 - `rejected`：被拒绝记录
 - `revoked`：被手动取消的实名记录
-- `applications`：每一次实名申请的完整记录
+- `applications`：每一次实名申请的完整记录，其中退群取消会以 `cancelled_by_leave` 状态保留
 - `active_by_user`：用户当前正在审核中的申请索引
 - `review_messages`：管理群审核通知消息 ID 与用户 QQ 的映射
 
@@ -62,6 +64,7 @@
 当前保留的扩展点：
 
 - 自动实名审核：实现 `realname_reviewer.py` 中的 `review_application(application)`
+- 审核器模板：复制 `realname_reviewer.example.py` 为本地的 `realname_reviewer.py`
 - 一人一实名：通过 `config.yaml` 的 `realname.one_qq_one_identity` 开关控制
 - 手动取消实名：管理群发送 `取消实名 QQ号`
 - 实名功能总开关：通过 `config.yaml` 的 `realname.enabled` 控制
@@ -211,6 +214,7 @@ python run_bot.py
 
 - `data/`
 - `NapCatDocs/`
+- `realname_reviewer.py`
 - Python 缓存文件
 
 `config.yaml` 和 `strings.yaml` 会提交到仓库。群号按需求不脱敏；如果未来在配置中填写真实 token 或 API Key，请注意仓库可见性。
