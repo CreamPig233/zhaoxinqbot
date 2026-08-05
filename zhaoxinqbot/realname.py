@@ -20,6 +20,7 @@ import uuid
 from typing import Any
 
 from .config import BotConfig, RealNameStrings
+from .errors import ErrorReporter
 from .napcat import NapCatClient
 from .storage import JsonStore, utc_now_iso
 
@@ -33,11 +34,13 @@ class RealNameAuditor:
         strings: RealNameStrings,
         store: JsonStore,
         client: NapCatClient,
+        error_reporter: ErrorReporter | None = None,
     ):
         self.config = config
         self.strings = strings
         self.store = store
         self.client = client
+        self.error_reporter = error_reporter
         self._application_locks: dict[int, asyncio.Lock] = {}
 
     async def on_member_change(self, event: dict[str, Any]) -> None:
@@ -70,25 +73,38 @@ class RealNameAuditor:
 
         user_id = int(event.get("user_id"))
         if await self.is_verified(user_id):
+            await self.send_rejoin_prompt(user_id)
             return
 
-        await self.client.set_group_ban(
-            self.config.groups.recruit_group,
-            user_id,
-            self.config.realname.mute_duration_seconds,
-        )
-        await self.client.send_group_msg(
-            self.config.groups.recruit_group,
-            [
-                {"type": "at", "data": {"qq": str(user_id)}},
-                {"type": "text", "data": {"text": f" {self.strings.join_prompt}"}},
-            ],
-        )
+        try:
+            await self.client.set_group_ban(
+                self.config.groups.recruit_group,
+                user_id,
+                self.config.realname.mute_duration_seconds,
+            )
+        except Exception as exc:
+            print(f"[realname] failed to mute new member {user_id}: {exc}")
+            await self.report_error("新成员禁言失败", exc, user_id=user_id, group_id=self.config.groups.recruit_group)
+            await self.safe_send_admin(f"新成员 {user_id} 入群后禁言失败，请管理员手动检查：{exc}")
+        try:
+            await self.client.send_group_msg(
+                self.config.groups.recruit_group,
+                [
+                    {"type": "at", "data": {"qq": str(user_id)}},
+                    {"type": "text", "data": {"text": f" {self.strings.join_prompt}"}},
+                ],
+            )
+        except Exception as exc:
+            print(f"[realname] failed to send join prompt to {user_id}: {exc}")
+            await self.report_error("新成员实名提示发送失败", exc, user_id=user_id, group_id=self.config.groups.recruit_group)
+            await self.safe_send_admin(f"新成员 {user_id} 的实名提示发送失败，请管理员手动提醒：{exc}")
 
     async def on_private_message(self, event: dict[str, Any]) -> None:
         """接收以配置命令开头的私聊实名申请。"""
 
         if not self.config.realname.enabled:
+            return
+        if is_self_message(event):
             return
 
         text = extract_text(event.get("message", event.get("raw_message", ""))).strip()
@@ -123,6 +139,14 @@ class RealNameAuditor:
         """在单用户锁内创建并推进一次实名申请，避免并发重复提交。"""
 
         data = self.store.load_realnames()
+        if str(user_id) in data.get("verified", {}):
+            await self.client.call(
+                "send_private_msg",
+                user_id=user_id,
+                message=self.strings.already_verified,
+            )
+            return
+
         if self.get_active_application(data, user_id):
             await self.client.call(
                 "send_private_msg",
@@ -171,8 +195,8 @@ class RealNameAuditor:
             "identity": identity,
         }
         self.store.save_realnames(data)
-        await self.client.call("send_private_msg", user_id=user_id, message=self.strings.manual_handoff)
         await self.notify_admins(user_id, identity, application["application_id"])
+        await self.safe_send_private(user_id, self.strings.manual_handoff)
 
     async def on_admin_group_message(self, event: dict[str, Any]) -> None:
         """处理管理群发出的批准、拒绝和取消实名命令。"""
@@ -266,12 +290,14 @@ class RealNameAuditor:
             "approve_mode": mode,
         }
         self.store.save_realnames(data)
-        await self.client.set_group_ban(self.config.groups.recruit_group, target_user, 0)
-        await self.client.send_group_msg(
-            self.config.groups.admin_group,
-            self.strings.approved_admin.format(user_id=target_user),
-        )
-        await self.client.call("send_private_msg", user_id=target_user, message=self.strings.approved_user)
+        unban_failed = ""
+        try:
+            await self.client.set_group_ban(self.config.groups.recruit_group, target_user, 0)
+        except Exception as exc:
+            unban_failed = f"；解除禁言失败：{exc}"
+            await self.report_error("实名通过后解除禁言失败", exc, user_id=target_user)
+        await self.safe_send_private(target_user, self.strings.approved_user)
+        await self.safe_send_admin(self.strings.approved_admin.format(user_id=target_user) + unban_failed)
 
     async def reject(
         self,
@@ -303,18 +329,14 @@ class RealNameAuditor:
             "reason": reason,
         }
         self.store.save_realnames(data)
-        await self.client.send_group_msg(
-            self.config.groups.admin_group,
-            self.strings.rejected_admin.format(user_id=target_user),
-        )
-        await self.client.call(
-            "send_private_msg",
-            user_id=target_user,
-            message=self.strings.rejected_user.format(
+        await self.safe_send_private(
+            target_user,
+            self.strings.rejected_user.format(
                 resubmit_prompt=self.strings.resubmit_prompt,
                 reason=reason,
             ),
         )
+        await self.safe_send_admin(self.strings.rejected_admin.format(user_id=target_user))
 
     async def revoke(self, target_user: int, operator_id: int, mode: str) -> None:
         """把已通过实名记录移入撤销分区。"""
@@ -339,6 +361,39 @@ class RealNameAuditor:
             self.strings.revoked_admin.format(user_id=target_user),
         )
 
+    async def send_rejoin_prompt(self, user_id: int) -> None:
+        """已实名用户重新加入招新群时发送单独欢迎语。"""
+
+        try:
+            await self.client.send_group_msg(
+                self.config.groups.recruit_group,
+                [
+                    {"type": "at", "data": {"qq": str(user_id)}},
+                    {"type": "text", "data": {"text": f" {self.strings.verified_join_prompt}"}},
+                ],
+            )
+        except Exception as exc:
+            print(f"[realname] failed to send verified join prompt to {user_id}: {exc}")
+            await self.report_error("已实名用户入群欢迎语发送失败", exc, user_id=user_id)
+            await self.safe_send_admin(f"已实名成员 {user_id} 的入群欢迎语发送失败，请管理员手动确认：{exc}")
+
+    async def safe_send_private(self, user_id: int, message: str) -> None:
+        """发送私聊通知；失败只记录日志，不中断实名状态流转。"""
+
+        try:
+            await self.client.call("send_private_msg", user_id=user_id, message=message)
+        except Exception as exc:
+            print(f"[realname] failed to send private message to {user_id}: {exc}")
+            await self.report_error("私聊通知发送失败", exc, user_id=user_id, message=message)
+
+    async def safe_send_admin(self, message: str) -> None:
+        """发送管理群通知；失败只记录日志，不中断实名状态流转。"""
+
+        try:
+            await self.client.send_group_msg(self.config.groups.admin_group, message)
+        except Exception as exc:
+            print(f"[realname] failed to send admin message: {exc}; message={message}")
+
     async def notify_admins(self, user_id: int, identity: dict[str, str], application_id: str) -> None:
         """向管理群发送审核通知，并记录通知消息 ID。"""
 
@@ -348,7 +403,12 @@ class RealNameAuditor:
             name=identity["name"],
             identity_id=identity["id"],
         )
-        message_id = await self.client.send_group_msg(self.config.groups.admin_group, msg)
+        try:
+            message_id = await self.client.send_group_msg(self.config.groups.admin_group, msg)
+        except Exception as exc:
+            print(f"[realname] failed to notify admins for application {application_id}: {exc}")
+            await self.report_error("实名人工审核通知发送失败", exc, application_id=application_id, user_id=user_id)
+            return
         if message_id is None:
             return
         data = self.store.load_realnames()
@@ -551,6 +611,7 @@ class RealNameAuditor:
         except asyncio.TimeoutError:
             return "timeout", self.strings.auto_timeout_reason
         except Exception as exc:
+            await self.report_error("外部实名审核异常", exc, application_id=application.get("application_id"))
             return "timeout", self.strings.auto_exception_reason.format(error=exc)
         return normalize_review_result(result, self.strings.auto_unknown_reason)
 
@@ -573,6 +634,10 @@ class RealNameAuditor:
             raise TypeError(f"{self.config.realname.auto_review.function_name} is not callable")
         return reviewer
 
+    async def report_error(self, title: str, exc: BaseException, **context: Any) -> None:
+        if self.error_reporter is not None:
+            await self.error_reporter.report(title, exc, **context)
+
 
 def extract_text(message: Any) -> str:
     """从 OneBot 消息数组中提取所有文本消息段。"""
@@ -586,6 +651,18 @@ def extract_text(message: Any) -> str:
         if isinstance(segment, dict) and segment.get("type") == "text":
             chunks.append(str((segment.get("data") or {}).get("text", "")))
     return "".join(chunks)
+
+
+def is_self_message(event: dict[str, Any]) -> bool:
+    """判断消息事件是否由机器人自己发出。"""
+
+    self_id = event.get("self_id")
+    if self_id is None:
+        return False
+    user_id = event.get("user_id")
+    sender = event.get("sender") if isinstance(event.get("sender"), dict) else {}
+    sender_id = sender.get("user_id")
+    return str(user_id) == str(self_id) or str(sender_id) == str(self_id)
 
 
 def extract_reply_id(event: dict[str, Any]) -> Any:

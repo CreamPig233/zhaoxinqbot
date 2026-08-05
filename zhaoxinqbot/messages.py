@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
+from .errors import ErrorReporter
 from .napcat import NapCatClient
 from .storage import JsonStore, utc_now_iso
 
@@ -23,10 +24,17 @@ MEDIA_TYPES = {"image", "record", "video", "file"}
 class MessageArchive:
     """持久化群消息事件，并标记被撤回的消息。"""
 
-    def __init__(self, store: JsonStore, client: NapCatClient, download_media: bool = True):
+    def __init__(
+        self,
+        store: JsonStore,
+        client: NapCatClient,
+        download_media: bool = True,
+        error_reporter: ErrorReporter | None = None,
+    ):
         self.store = store
         self.client = client
         self.download_media = download_media
+        self.error_reporter = error_reporter
         self.index = self.store.load_message_index()
 
     async def record_group_message(self, event: dict[str, Any]) -> None:
@@ -122,6 +130,13 @@ class MessageArchive:
                 return target
         except Exception as exc:
             print(f"[archive] media save failed for {media_type}: {exc}")
+            await self.report_error(
+                "媒体归档保存失败",
+                exc,
+                group_id=group_id,
+                message_id=message_id,
+                media_type=media_type,
+            )
         return None
 
     async def _resolve_media_source(self, media_type: str, data: dict[str, Any]) -> str:
@@ -139,6 +154,7 @@ class MessageArchive:
                 info = await self.client.get_file(file=str(data.get("file", "")), file_id=str(data.get("file_id", "")))
         except Exception as exc:
             print(f"[archive] media lookup failed for {media_type}: {exc}")
+            await self.report_error("媒体来源解析失败", exc, media_type=media_type, data=data)
             return ""
 
         return str(info.get("url") or info.get("path") or info.get("file") or "")
@@ -152,3 +168,7 @@ class MessageArchive:
                 with target.open("wb") as f:
                     async for chunk in resp.content.iter_chunked(1024 * 64):
                         f.write(chunk)
+
+    async def report_error(self, title: str, exc: BaseException, **context: Any) -> None:
+        if self.error_reporter is not None:
+            await self.error_reporter.report(title, exc, **context)

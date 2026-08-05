@@ -24,6 +24,7 @@ class NapCatConfig:
     ws_url: str
     access_token: str = ""
     reconnect_seconds: int = 5
+    send_message_delay_seconds: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,7 @@ class RealNameConfig:
 
     enabled: bool = True
     one_qq_one_identity: bool = True
-    mute_duration_seconds: int = 30 * 24 * 60 * 60
+    mute_duration_seconds: int = 90 * 24 * 60 * 60
     admin_approvers: set[int] = field(default_factory=set)
     auto_review: AutoReviewConfig = field(
         default_factory=lambda: AutoReviewConfig(module_path=Path("realname_reviewer.py"))
@@ -114,8 +115,10 @@ class RealNameStrings:
     revoke_command: str
     identity_format: str
     join_prompt: str
+    verified_join_prompt: str
     resubmit_prompt: str
     invalid_format: str
+    already_verified: str
     duplicate_identity: str
     duplicate_active_application: str
     auto_reviewing: str
@@ -193,6 +196,7 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
             ws_url=str(napcat.get("ws_url", "ws://127.0.0.1:3001/")),
             access_token=str(napcat.get("access_token", "") or ""),
             reconnect_seconds=int(napcat.get("reconnect_seconds", 5)),
+            send_message_delay_seconds=float(napcat.get("send_message_delay_seconds", 1)),
         ),
         groups=GroupConfig(
             recruit_group=int(groups.get("recruit_group", 810192062)),
@@ -201,7 +205,7 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
         realname=RealNameConfig(
             enabled=bool(realname.get("enabled", True)),
             one_qq_one_identity=bool(realname.get("one_qq_one_identity", True)),
-            mute_duration_seconds=int(realname.get("mute_duration_seconds", 30 * 24 * 60 * 60)),
+            mute_duration_seconds=int(realname.get("mute_duration_seconds", 90 * 24 * 60 * 60)),
             admin_approvers={int(x) for x in realname.get("admin_approvers", [])},
             auto_review=AutoReviewConfig(
                 module_path=Path((realname.get("auto_review") or {}).get("module_path", "realname_reviewer.py")),
@@ -244,8 +248,10 @@ def load_strings(path: str | Path = "strings.yaml") -> BotStrings:
             revoke_command=str(realname["revoke_command"]),
             identity_format=str(realname["identity_format"]),
             join_prompt=str(realname["join_prompt"]),
+            verified_join_prompt=str(realname["verified_join_prompt"]),
             resubmit_prompt=str(realname["resubmit_prompt"]),
             invalid_format=str(realname["invalid_format"]),
+            already_verified=str(realname["already_verified"]),
             duplicate_identity=str(realname["duplicate_identity"]),
             duplicate_active_application=str(realname["duplicate_active_application"]),
             auto_reviewing=str(realname["auto_reviewing"]),

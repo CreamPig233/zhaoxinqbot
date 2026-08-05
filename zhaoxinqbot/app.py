@@ -9,10 +9,11 @@ from __future__ import annotations
 from typing import Any
 
 from .config import load_config, load_strings
+from .errors import ErrorReporter
 from .messages import MessageArchive
 from .napcat import NapCatClient
 from .qa import QuestionAnswerer
-from .realname import RealNameAuditor
+from .realname import RealNameAuditor, is_self_message
 from .storage import JsonStore
 
 
@@ -23,14 +24,26 @@ class BotApp:
         self.config = load_config()
         self.strings = load_strings()
         self.store = JsonStore(self.config.storage.data_dir)
-        self.client = NapCatClient(self.config.napcat.ws_url, self.config.napcat.access_token)
+        self.client = NapCatClient(
+            self.config.napcat.ws_url,
+            self.config.napcat.access_token,
+            self.config.napcat.send_message_delay_seconds,
+        )
+        self.error_reporter = ErrorReporter(self.client, self.config.groups.admin_group)
         self.archive = MessageArchive(
             self.store,
             self.client,
             download_media=self.config.message_archive.download_media,
+            error_reporter=self.error_reporter,
         )
-        self.realname = RealNameAuditor(self.config, self.strings.realname, self.store, self.client)
-        self.qa = QuestionAnswerer(self.config.qa, self.strings.qa, self.client)
+        self.realname = RealNameAuditor(
+            self.config,
+            self.strings.realname,
+            self.store,
+            self.client,
+            error_reporter=self.error_reporter,
+        )
+        self.qa = QuestionAnswerer(self.config.qa, self.strings.qa, self.client, error_reporter=self.error_reporter)
 
     async def run(self) -> None:
         """连接 NapCat，并在进程退出前持续自动重连。"""
@@ -45,6 +58,7 @@ class BotApp:
             await self._handle_event(event)
         except Exception as exc:
             print(f"[bot] event handler failed: {exc}; event={event}")
+            await self.error_reporter.report("事件处理失败", exc, event=event)
 
     async def _handle_event(self, event: dict[str, Any]) -> None:
         """按 post_type 和子类型把 OneBot 事件路由到功能模块。"""
@@ -52,6 +66,8 @@ class BotApp:
         post_type = event.get("post_type")
 
         if post_type == "message" and event.get("message_type") == "group":
+            if is_self_message(event):
+                return
             if self.config.message_archive.enabled:
                 await self.archive.record_group_message(event)
             await self.realname.on_admin_group_message(event)

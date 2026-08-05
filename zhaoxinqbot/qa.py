@@ -14,6 +14,7 @@ from typing import Any
 import aiohttp
 
 from .config import QAConfig, QAStrings
+from .errors import ErrorReporter
 from .napcat import NapCatClient
 from .realname import extract_text
 
@@ -21,10 +22,17 @@ from .realname import extract_text
 class QuestionAnswerer:
     """把群文字消息分类到配置好的预设问题。"""
 
-    def __init__(self, config: QAConfig, strings: QAStrings, client: NapCatClient):
+    def __init__(
+        self,
+        config: QAConfig,
+        strings: QAStrings,
+        client: NapCatClient,
+        error_reporter: ErrorReporter | None = None,
+    ):
         self.config = config
         self.strings = strings
         self.client = client
+        self.error_reporter = error_reporter
 
     async def on_group_message(self, event: dict[str, Any]) -> None:
         """当群消息命中预设问题时回复对应答案。"""
@@ -94,6 +102,7 @@ class QuestionAnswerer:
                 return self.strings.preset_answers[index].answer
         except Exception as exc:
             print(f"[qa] llm classify failed, fallback to builtin matcher: {exc}")
+            await self.report_error("问答 LLM 分类失败，已回退本地匹配", exc, text=text)
         return None
 
     def match_question_builtin(self, text: str) -> str | None:
@@ -124,6 +133,11 @@ class QuestionAnswerer:
             await self.client.delete_msg(message_id)
         except Exception as exc:
             print(f"[qa] failed to recall answer {message_id}: {exc}")
+            await self.report_error("问答回复撤回失败", exc, message_id=message_id)
+
+    async def report_error(self, title: str, exc: BaseException, **context: Any) -> None:
+        if self.error_reporter is not None:
+            await self.error_reporter.report(title, exc, **context)
 
 
 def normalize_text(text: str) -> str:

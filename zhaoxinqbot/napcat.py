@@ -16,14 +16,16 @@ import websockets
 
 
 EventHandler = Callable[[dict[str, Any]], Awaitable[None]]
+SEND_MESSAGE_ACTIONS = {"send_group_msg", "send_private_msg", "send_msg"}
 
 
 class NapCatClient:
     """NapCat OneBot WebSocket API 的异步封装。"""
 
-    def __init__(self, ws_url: str, access_token: str = ""):
+    def __init__(self, ws_url: str, access_token: str = "", send_message_delay_seconds: float = 0):
         self.ws_url = ws_url
         self.access_token = access_token
+        self.send_message_delay_seconds = max(0.0, float(send_message_delay_seconds))
         self._ws: Any = None
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
@@ -85,11 +87,16 @@ class NapCatClient:
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
         self._pending[echo] = future
 
-        await self._ws.send(json.dumps({"action": action, "params": params, "echo": echo}, ensure_ascii=False))
-        response = await asyncio.wait_for(future, timeout=30)
-        if response.get("status") != "ok" or response.get("retcode") not in (0, None):
-            raise RuntimeError(f"{action} failed: {response}")
-        return response.get("data") or {}
+        try:
+            if action in SEND_MESSAGE_ACTIONS and self.send_message_delay_seconds > 0:
+                await asyncio.sleep(self.send_message_delay_seconds)
+            await self._ws.send(json.dumps({"action": action, "params": params, "echo": echo}, ensure_ascii=False))
+            response = await asyncio.wait_for(future, timeout=30)
+            if response.get("status") != "ok" or response.get("retcode") not in (0, None):
+                raise RuntimeError(f"{action} failed: {response}")
+            return response.get("data") or {}
+        finally:
+            self._pending.pop(echo, None)
 
     async def send_group_msg(self, group_id: int, message: str | list[dict[str, Any]]) -> int | str | None:
         """发送群消息，并在 NapCat 返回时取出 message_id。"""
