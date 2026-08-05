@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import inspect
+import re
+import unicodedata
 import uuid
 from typing import Any
 
@@ -212,12 +214,28 @@ class RealNameAuditor:
         return str(user_id) in data.get("verified", {})
 
     def parse_identity(self, text: str) -> dict[str, str] | None:
-        """把“实名 姓名 编号 单位”解析成可持久化的身份对象。"""
+        """把“实名 姓名 学号”及常见符号分隔写法解析为身份对象。"""
 
-        parts = text.split(maxsplit=3)
-        if len(parts) < 4:
+        command = self.strings.submit_command.strip()
+        normalized = unicodedata.normalize("NFKC", text).strip()
+        normalized_command = unicodedata.normalize("NFKC", command)
+        if not normalized.startswith(normalized_command):
             return None
-        return {"name": parts[1], "id": parts[2], "unit": parts[3]}
+
+        content = normalized[len(normalized_command) :].strip()
+        parts = [part for part in IDENTITY_SEPARATOR_RE.split(content) if part]
+        if len(parts) != 2:
+            return None
+
+        name = normalize_person_name(parts[0])
+        identity_id = parts[1].strip().upper()
+        if (
+            not name
+            or not STUDENT_ID_RE.fullmatch(identity_id)
+            or not MIN_STUDENT_ID_LENGTH <= len(identity_id) <= MAX_STUDENT_ID_LENGTH
+        ):
+            return None
+        return {"name": name, "id": identity_id}
 
     async def approve(
         self,
@@ -329,7 +347,6 @@ class RealNameAuditor:
             application_id=application_id,
             name=identity["name"],
             identity_id=identity["id"],
-            unit=identity["unit"],
         )
         message_id = await self.client.send_group_msg(self.config.groups.admin_group, msg)
         if message_id is None:
@@ -345,17 +362,25 @@ class RealNameAuditor:
     def find_identity_owner(self, data: dict[str, Any], identity: dict[str, str]) -> str | None:
         """查找是否已有 QQ 使用相同实名信息。"""
 
-        key = (identity["name"], identity["id"], identity["unit"])
+        key = (normalize_person_name(identity["name"]), identity["id"].upper())
         for bucket in ("verified", "pending"):
             for user_id, item in data.get(bucket, {}).items():
                 current = item.get("identity", {})
-                if (current.get("name"), current.get("id"), current.get("unit")) == key:
+                current_key = (
+                    normalize_person_name(str(current.get("name", ""))),
+                    str(current.get("id", "")).upper(),
+                )
+                if current_key == key:
                     return user_id
         for item in data.get("applications", {}).values():
             if item.get("status") not in ACTIVE_APPLICATION_STATUSES:
                 continue
             current = item.get("identity", {})
-            if (current.get("name"), current.get("id"), current.get("unit")) == key:
+            current_key = (
+                normalize_person_name(str(current.get("name", ""))),
+                str(current.get("id", "")).upper(),
+            )
+            if current_key == key:
                 return str(item.get("user_id"))
         return None
 
@@ -617,4 +642,17 @@ def normalize_review_result(result: Any, unknown_reason_template: str) -> tuple[
     return mapping.get(normalized, "timeout"), reason or unknown_reason_template.format(status=status)
 
 
+def normalize_person_name(name: str) -> str:
+    """统一姓名中常见的少数民族间隔号写法。"""
+
+    return name.translate(NAME_PUNCTUATION_TRANSLATION).strip()
+
+
 ACTIVE_APPLICATION_STATUSES = {"created", "auto_reviewing", "manual_pending"}
+
+# 姓名中的少数民族间隔号不作为分隔符，并统一为常用的 U+00B7 中间点。
+NAME_PUNCTUATION_TRANSLATION = str.maketrans({"•": "·", "‧": "·", "・": "·"})
+IDENTITY_SEPARATOR_RE = re.compile(r"[\s,:;、/\\|]+")
+STUDENT_ID_RE = re.compile(r"[A-Z0-9]+")
+MIN_STUDENT_ID_LENGTH = 7
+MAX_STUDENT_ID_LENGTH = 9
