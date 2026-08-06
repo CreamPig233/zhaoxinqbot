@@ -133,7 +133,10 @@ qa:
 
 ## 配置文件分层
 
-项目现在只有两个需要人工维护的 YAML 文件。
+项目的公开配置分为两个 YAML 文件，敏感凭据单独保存在 `.secrets`。
+
+首次运行前复制 `.secrets.example` 为 `.secrets`，然后填写 NapCat token、QA API Key
+和实名审核登录账号密码。`.secrets` 已加入 `.gitignore`，不得提交到仓库。
 
 ### config.yaml
 
@@ -172,7 +175,7 @@ qa:
 - 网络类型：WebSocket 服务端，即正向 WS
 - 消息上报格式：`array`
 - 是否上报自身消息：通常关闭
-- token：如果配置了 token，需要与 `config.yaml` 的 `napcat.access_token` 保持一致
+- token：如果配置了 token，需要与 `.secrets` 的 `napcat.access_token` 保持一致
 
 机器人侧默认连接：
 
@@ -217,7 +220,7 @@ python run_bot.py
 - `realname_reviewer.py`
 - Python 缓存文件
 
-`config.yaml` 和 `strings.yaml` 会提交到仓库。群号按需求不脱敏；如果未来在配置中填写真实 token 或 API Key，请注意仓库可见性。
+`config.yaml`、`strings.yaml` 和 `.secrets.example` 会提交到仓库；真实 token、API Key 和登录凭据只填写在被忽略的 `.secrets` 中。
 
 ## 扩展建议
 

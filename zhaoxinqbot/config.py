@@ -179,10 +179,20 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
     return raw
 
 
+def load_secrets(path: str | Path = ".secrets") -> dict[str, Any]:
+    """Load optional local secrets without requiring the file in deployments."""
+
+    secrets_path = Path(path)
+    if not secrets_path.exists():
+        return {}
+    return load_yaml(secrets_path)
+
+
 def load_config(path: str | Path = "config.yaml") -> BotConfig:
     """从 config.yaml 加载运行配置。"""
 
     raw = load_yaml(path)
+    secrets = load_secrets()
     napcat = raw.get("napcat", {}) or {}
     groups = raw.get("groups", {}) or {}
     realname = raw.get("realname", {}) or {}
@@ -190,11 +200,14 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
     qa = raw.get("qa", {}) or {}
     llm = qa.get("llm", {}) or {}
     storage = raw.get("storage", {}) or {}
+    napcat_secret = secrets.get("napcat", {}) or {}
+    qa_secret = secrets.get("qa", {}) or {}
+    llm_secret = qa_secret.get("llm", {}) or {}
 
     return BotConfig(
         napcat=NapCatConfig(
             ws_url=str(napcat.get("ws_url", "ws://127.0.0.1:3001/")),
-            access_token=str(napcat.get("access_token", "") or ""),
+            access_token=str(napcat_secret.get("access_token", napcat.get("access_token", "")) or ""),
             reconnect_seconds=int(napcat.get("reconnect_seconds", 5)),
             send_message_delay_seconds=float(napcat.get("send_message_delay_seconds", 1)),
         ),
@@ -224,7 +237,7 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
             llm=LLMConfig(
                 enabled=bool(llm.get("enabled", False)),
                 api_url=str(llm.get("api_url", "https://api.openai.com/v1/chat/completions")),
-                api_key=str(llm.get("api_key", "") or ""),
+                api_key=str(llm_secret.get("api_key", llm.get("api_key", "")) or ""),
                 model=str(llm.get("model", "gpt-4o-mini")),
                 timeout_seconds=int(llm.get("timeout_seconds", 20)),
             ),

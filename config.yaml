@@ -2,14 +2,11 @@
 # -----------------------------------------------------------------------------
 # 本文件集中管理机器人运行参数、功能开关和外部服务连接信息。
 # 所有“机器人发出去的文案”和“预设问答内容”请放到 strings.yaml。
-# 群号按需求不脱敏；如果将来填写 access_token 或 api_key，请注意仓库权限。
+# 群号按需求不脱敏；凭据统一填写在不会提交的 .secrets 中。
 
 napcat:
   # NapCat WebUI 中启用“WebSocket 服务端/正向 WS”后填写这里。
   ws_url: ws://127.0.0.1:3001/
-
-  # NapCat 网络配置中的鉴权 token。未设置 token 时保持空字符串。
-  access_token: ""
 
   # WebSocket 断开后的重连等待秒数。
   reconnect_seconds: 5
@@ -67,14 +64,11 @@ qa:
 
   llm:
     # 开启后优先调用 OpenAI 兼容 Chat Completions 接口判断是否命中预设问题。
-    # 未开启、未填写 api_key 或调用失败时，会自动回退到本地相似度判断。
+    # 未开启、未在 .secrets 填写 api_key 或调用失败时，会自动回退到本地相似度判断。
     enabled: false
 
     # OpenAI 兼容接口地址，可替换为自建网关或其他兼容服务。
     api_url: https://api.openai.com/v1/chat/completions
-
-    # 大模型 API Key。公开仓库中请谨慎填写真实密钥。
-    api_key: ""
 
     # 用于问题分类的小模型即可，回答文本始终来自 strings.yaml 的 preset_answers。
     model: gpt-4o-mini
