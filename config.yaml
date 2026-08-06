@@ -54,8 +54,11 @@ realname:
     timeout_seconds: 30
 
 message_archive:
-  # 总开关：开启后记录所有群消息 JSON 副本，并支持撤回标记。
+  # 总开关：开启后记录群消息 JSON 副本，并支持撤回标记。
   enabled: true
+
+  # 只记录这些群的消息；留空表示记录所有群。
+  group_ids: []
 
   # 开启后会尽量保存图片、语音、视频、文件等媒体副本到 data/media。
   download_media: true

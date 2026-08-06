@@ -65,6 +65,8 @@ class MessageArchiveConfig:
 
     enabled: bool = True
     download_media: bool = True
+    # Empty means all groups; a non-empty set is an allowlist.
+    group_ids: set[int] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -241,6 +243,7 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
         message_archive=MessageArchiveConfig(
             enabled=bool(archive.get("enabled", True)),
             download_media=bool(archive.get("download_media", True)),
+            group_ids={int(x) for x in (archive.get("group_ids", []) or [])},
         ),
         qa=QAConfig(
             enabled=bool(qa.get("enabled", True)),

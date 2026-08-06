@@ -85,7 +85,10 @@ class BotApp:
         if post_type == "message" and event.get("message_type") == "group":
             if is_self_message(event):
                 return
-            if self.config.message_archive.enabled:
+            archive_config = self.config.message_archive
+            group_id = event.get("group_id")
+            in_archive_scope = not archive_config.group_ids or group_id in archive_config.group_ids
+            if archive_config.enabled and in_archive_scope:
                 await self.archive.record_group_message(event)
             await self.realname.on_admin_group_message(event)
             await self.qa.on_group_message(event)
@@ -101,6 +104,9 @@ class BotApp:
                 await self.realname.on_member_change(event)
                 return
             if notice_type == "group_recall" and self.config.message_archive.enabled:
+                group_id = event.get("group_id")
+                if self.config.message_archive.group_ids and group_id not in self.config.message_archive.group_ids:
+                    return
                 await self.archive.mark_recalled(event)
 
 
