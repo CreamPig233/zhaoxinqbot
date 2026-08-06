@@ -52,6 +52,7 @@ class RealNameConfig:
     one_qq_one_identity: bool = True
     mute_duration_seconds: int = 30 * 24 * 60 * 60
     mute_refresh_interval_seconds: int = 12 * 60 * 60
+    whitelist_users: set[int] = field(default_factory=set)
     admin_approvers: set[int] = field(default_factory=set)
     auto_review: AutoReviewConfig = field(
         default_factory=lambda: AutoReviewConfig(module_path=Path("realname_reviewer.py"))
@@ -205,6 +206,7 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
     napcat_secret = secrets.get("napcat", {}) or {}
     qa_secret = secrets.get("qa", {}) or {}
     llm_secret = qa_secret.get("llm", {}) or {}
+    realname_secret = secrets.get("realname", {}) or {}
 
     return BotConfig(
         napcat=NapCatConfig(
@@ -222,7 +224,14 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
             one_qq_one_identity=bool(realname.get("one_qq_one_identity", True)),
             mute_duration_seconds=int(realname.get("mute_duration_seconds", 30 * 24 * 60 * 60)),
             mute_refresh_interval_seconds=int(realname.get("mute_refresh_interval_seconds", 12 * 60 * 60)),
-            admin_approvers={int(x) for x in realname.get("admin_approvers", [])},
+            whitelist_users={
+                int(x)
+                for x in (realname_secret.get("whitelist_users", realname.get("whitelist_users", [])) or [])
+            },
+            admin_approvers={
+                int(x)
+                for x in (realname_secret.get("admin_approvers", realname.get("admin_approvers", [])) or [])
+            },
             auto_review=AutoReviewConfig(
                 module_path=Path((realname.get("auto_review") or {}).get("module_path", "realname_reviewer.py")),
                 function_name=str((realname.get("auto_review") or {}).get("function_name", "review_application")),

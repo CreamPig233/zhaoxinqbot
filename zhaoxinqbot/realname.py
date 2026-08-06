@@ -85,12 +85,13 @@ class RealNameAuditor:
         members = await self.client.get_group_member_list(self.config.groups.recruit_group)
         data = self.store.load_realnames()
         verified = {str(user_id) for user_id in data.get("verified", {})}
+        whitelist = {str(user_id) for user_id in self.config.realname.whitelist_users}
         for member in members:
             try:
                 user_id = int(member.get("user_id", 0))
             except (TypeError, ValueError):
                 continue
-            if not user_id or str(user_id) in verified:
+            if not user_id or str(user_id) in verified or str(user_id) in whitelist:
                 continue
             # 管理员/群主不能被普通群禁言，跳过以免扫描日志反复报错。
             if str(member.get("role", "")).lower() in {"owner", "admin"}:
@@ -302,7 +303,7 @@ class RealNameAuditor:
         """判断某个 QQ 是否已有通过的实名记录。"""
 
         data = self.store.load_realnames()
-        return str(user_id) in data.get("verified", {})
+        return user_id in self.config.realname.whitelist_users or str(user_id) in data.get("verified", {})
 
     def parse_identity(self, text: str) -> dict[str, str] | None:
         """把“实名 姓名 学号”及常见符号分隔写法解析为身份对象。"""
@@ -364,7 +365,8 @@ class RealNameAuditor:
             unban_failed = f"；解除禁言失败：{exc}"
             await self.report_error("实名通过后解除禁言失败", exc, user_id=target_user)
         await self.safe_send_private(target_user, self.strings.approved_user)
-        await self.safe_send_admin(self.strings.approved_admin.format(user_id=target_user) + unban_failed)
+        if mode == "manual":
+            await self.safe_send_admin(self.strings.approved_admin.format(user_id=target_user) + unban_failed)
 
     async def reject(
         self,
@@ -403,7 +405,8 @@ class RealNameAuditor:
                 reason=reason,
             ),
         )
-        await self.safe_send_admin(self.strings.rejected_admin.format(user_id=target_user))
+        if mode == "manual":
+            await self.safe_send_admin(self.strings.rejected_admin.format(user_id=target_user))
 
     async def revoke(self, target_user: int, operator_id: int, mode: str) -> None:
         """把已通过实名记录移入撤销分区。"""

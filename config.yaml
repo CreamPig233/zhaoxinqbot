@@ -12,7 +12,7 @@ napcat:
   reconnect_seconds: 5
 
   # 机器人发送群消息/私聊消息前的延迟秒数，用于降低连续发消息过快的风险。
-  send_message_delay_seconds: 1
+  send_message_delay_seconds: 0.5
 
 groups:
   # 招新群：新成员入群禁言、实名提示、成员进退日志都围绕该群处理。
@@ -34,8 +34,13 @@ realname:
   # 未实名成员续禁言扫描间隔，单位秒。每次扫描会重新设置一轮 30 天禁言。
   mute_refresh_interval_seconds: 43200
 
+  # 实名白名单 QQ 号列表。白名单用户在招新群内视为已经实名，不会被入群禁言或续禁言。
+  # 实际名单请写入 .secrets 的 realname.whitelist_users。
+  # whitelist_users: []
+
   # 允许审核实名信息的 QQ 号列表。留空表示管理群内所有成员都能审核。
-  admin_approvers: []
+  # 实际名单请写入 .secrets 的 realname.admin_approvers。
+  # admin_approvers: []
 
   auto_review:
     # 外部实名审核 Python 文件路径。该文件由你自行实现，机器人只负责调用。
