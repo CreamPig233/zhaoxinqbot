@@ -56,6 +56,10 @@ qa:
   # 总开关：开启后机器人会判断群内文字消息是否命中 strings.yaml 中的预设问答。
   enabled: true
 
+  # QA 只分析这些群的消息。当前仅启用招新群。
+  group_ids:
+    - 810192062
+
   # 机器人发出的问答回复会在该秒数后撤回，0 或负数表示不撤回。
   recall_after_seconds: 60
 
@@ -68,10 +72,10 @@ qa:
     enabled: false
 
     # OpenAI 兼容接口地址，可替换为自建网关或其他兼容服务。
-    api_url: https://api.openai.com/v1/chat/completions
+    api_url: https://api.siliconflow.cn/v1/chat/completions
 
     # 用于问题分类的小模型即可，回答文本始终来自 strings.yaml 的 preset_answers。
-    model: gpt-4o-mini
+    model: deepseek-ai/DeepSeek-V4-Flash
 
     # 大模型分类请求超时时间，单位秒。
     timeout_seconds: 20

@@ -104,8 +104,13 @@
 
 ```yaml
 qa:
+  group_ids:
+    - 810192062
   recall_after_seconds: 60
 ```
+
+`qa.group_ids` 是问答生效群列表。当前只包含招新群，其他群消息不会进入本地或
+大模型分类流程。
 
 问答判断有两层：
 

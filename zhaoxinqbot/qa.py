@@ -39,6 +39,9 @@ class QuestionAnswerer:
 
         if not self.config.enabled:
             return
+        group_id = int(event["group_id"])
+        if group_id not in self.config.group_ids:
+            return
         text = extract_text(event.get("message", event.get("raw_message", ""))).strip()
         if not text:
             return
@@ -47,7 +50,7 @@ class QuestionAnswerer:
         if not answer:
             return
 
-        sent_id = await self.client.send_group_msg(int(event["group_id"]), answer)
+        sent_id = await self.client.send_group_msg(group_id, answer)
         if sent_id is not None and self.config.recall_after_seconds > 0:
             asyncio.create_task(self._recall_later(sent_id))
 

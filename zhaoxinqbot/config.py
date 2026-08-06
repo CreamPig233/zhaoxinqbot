@@ -81,6 +81,7 @@ class QAConfig:
     """预设问答匹配和回复撤回的运行开关。"""
 
     enabled: bool = True
+    group_ids: set[int] = field(default_factory=set)
     recall_after_seconds: int = 60
     confidence_threshold: float = 0.72
     llm: LLMConfig = field(default_factory=LLMConfig)
@@ -232,6 +233,7 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
         ),
         qa=QAConfig(
             enabled=bool(qa.get("enabled", True)),
+            group_ids={int(x) for x in qa.get("group_ids", [groups.get("recruit_group", 810192062)])},
             recall_after_seconds=int(qa.get("recall_after_seconds", 60)),
             confidence_threshold=float(qa.get("confidence_threshold", 0.72)),
             llm=LLMConfig(
