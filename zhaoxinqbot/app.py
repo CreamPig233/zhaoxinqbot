@@ -49,7 +49,24 @@ class BotApp:
         """连接 NapCat，并在进程退出前持续自动重连。"""
 
         print(f"[bot] connecting to {self.config.napcat.ws_url}")
-        await self.client.connect_forever(self.handle_event, self.config.napcat.reconnect_seconds)
+        self.realname.start_mute_refresh()
+        try:
+            await self.client.connect_forever(
+                self.handle_event,
+                self.config.napcat.reconnect_seconds,
+                on_connect=self.on_connect,
+            )
+        finally:
+            await self.realname.stop_mute_refresh()
+
+    async def on_connect(self) -> None:
+        """WebSocket 建立后执行一次需要在线 API 的初始化任务。"""
+
+        try:
+            await self.realname.refresh_unverified_mutes()
+        except Exception as exc:
+            print(f"[bot] connect hook failed: {exc}")
+            await self.error_reporter.report("连接后初始化任务失败", exc)
 
     async def handle_event(self, event: dict[str, Any]) -> None:
         """包住事件处理，避免单个坏事件导致机器人退出。"""

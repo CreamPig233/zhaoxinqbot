@@ -42,6 +42,73 @@ class RealNameAuditor:
         self.client = client
         self.error_reporter = error_reporter
         self._application_locks: dict[int, asyncio.Lock] = {}
+        self._mute_refresh_task: asyncio.Task[None] | None = None
+
+    def start_mute_refresh(self) -> asyncio.Task[None]:
+        """启动未实名成员的周期性续禁言任务。"""
+
+        if self._mute_refresh_task is None or self._mute_refresh_task.done():
+            self._mute_refresh_task = asyncio.create_task(self._mute_refresh_loop())
+        return self._mute_refresh_task
+
+    async def stop_mute_refresh(self) -> None:
+        """停止周期性续禁言任务。"""
+
+        if self._mute_refresh_task is None:
+            return
+        self._mute_refresh_task.cancel()
+        try:
+            await self._mute_refresh_task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._mute_refresh_task = None
+
+    async def _mute_refresh_loop(self) -> None:
+        interval = max(1, self.config.realname.mute_refresh_interval_seconds)
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self.refresh_unverified_mutes()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[realname] failed to refresh unverified mutes: {exc}")
+                await self.report_error("未实名成员续禁言扫描失败", exc)
+
+    async def refresh_unverified_mutes(self) -> None:
+        """扫描招新群成员，并为未实名成员补充一轮禁言。"""
+
+        if not self.config.realname.enabled or not self.client.is_connected:
+            return
+
+        members = await self.client.get_group_member_list(self.config.groups.recruit_group)
+        data = self.store.load_realnames()
+        verified = {str(user_id) for user_id in data.get("verified", {})}
+        for member in members:
+            try:
+                user_id = int(member.get("user_id", 0))
+            except (TypeError, ValueError):
+                continue
+            if not user_id or str(user_id) in verified:
+                continue
+            # 管理员/群主不能被普通群禁言，跳过以免扫描日志反复报错。
+            if str(member.get("role", "")).lower() in {"owner", "admin"}:
+                continue
+            try:
+                await self.client.set_group_ban(
+                    self.config.groups.recruit_group,
+                    user_id,
+                    self.config.realname.mute_duration_seconds,
+                )
+            except Exception as exc:
+                print(f"[realname] failed to refresh mute for {user_id}: {exc}")
+                await self.report_error(
+                    "未实名成员续禁言失败",
+                    exc,
+                    user_id=user_id,
+                    group_id=self.config.groups.recruit_group,
+                )
 
     async def on_member_change(self, event: dict[str, Any]) -> None:
         """记录入群/退群通知，并为新成员启动实名流程。"""

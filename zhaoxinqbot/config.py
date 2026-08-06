@@ -50,7 +50,8 @@ class RealNameConfig:
 
     enabled: bool = True
     one_qq_one_identity: bool = True
-    mute_duration_seconds: int = 90 * 24 * 60 * 60
+    mute_duration_seconds: int = 30 * 24 * 60 * 60
+    mute_refresh_interval_seconds: int = 12 * 60 * 60
     admin_approvers: set[int] = field(default_factory=set)
     auto_review: AutoReviewConfig = field(
         default_factory=lambda: AutoReviewConfig(module_path=Path("realname_reviewer.py"))
@@ -219,7 +220,8 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
         realname=RealNameConfig(
             enabled=bool(realname.get("enabled", True)),
             one_qq_one_identity=bool(realname.get("one_qq_one_identity", True)),
-            mute_duration_seconds=int(realname.get("mute_duration_seconds", 90 * 24 * 60 * 60)),
+            mute_duration_seconds=int(realname.get("mute_duration_seconds", 30 * 24 * 60 * 60)),
+            mute_refresh_interval_seconds=int(realname.get("mute_refresh_interval_seconds", 12 * 60 * 60)),
             admin_approvers={int(x) for x in realname.get("admin_approvers", [])},
             auto_review=AutoReviewConfig(
                 module_path=Path((realname.get("auto_review") or {}).get("module_path", "realname_reviewer.py")),

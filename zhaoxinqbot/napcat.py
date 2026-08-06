@@ -29,7 +29,16 @@ class NapCatClient:
         self._ws: Any = None
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
-    async def connect_forever(self, handler: EventHandler, reconnect_seconds: int = 5) -> None:
+    @property
+    def is_connected(self) -> bool:
+        return self._ws is not None
+
+    async def connect_forever(
+        self,
+        handler: EventHandler,
+        reconnect_seconds: int = 5,
+        on_connect: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         """连接、分发事件，并在临时故障后重连。"""
 
         headers = {}
@@ -45,6 +54,8 @@ class NapCatClient:
                     ping_timeout=20,
                 ) as ws:
                     self._ws = ws
+                    if on_connect is not None:
+                        asyncio.create_task(on_connect())
                     async for raw in ws:
                         await self._dispatch(raw, handler)
             except Exception as exc:
@@ -113,6 +124,12 @@ class NapCatClient:
         """禁言或解除禁言群成员；duration 为 0 表示解除禁言。"""
 
         await self.call("set_group_ban", group_id=group_id, user_id=user_id, duration=duration)
+
+    async def get_group_member_list(self, group_id: int) -> list[dict[str, Any]]:
+        """获取群成员列表。"""
+
+        data = await self.call("get_group_member_list", group_id=group_id)
+        return data if isinstance(data, list) else []
 
     async def get_image(self, file: str = "", file_id: str = "") -> dict[str, Any]:
         """把图片消息段里的文件标识解析为路径或 URL 元数据。"""
