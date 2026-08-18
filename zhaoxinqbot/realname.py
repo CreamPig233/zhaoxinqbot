@@ -15,6 +15,7 @@ import asyncio
 import importlib.util
 import inspect
 import re
+import time
 import unicodedata
 import uuid
 from typing import Any
@@ -23,6 +24,16 @@ from .config import BotConfig, RealNameStrings
 from .errors import ErrorReporter
 from .napcat import NapCatClient
 from .storage import JsonStore, utc_now_iso
+
+
+def is_member_muted(member: dict[str, Any], now: float | None = None) -> bool:
+    """Return whether a member's OneBot mute expiry is still in the future."""
+
+    try:
+        mute_until = float(member.get("shut_up_timestamp", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    return mute_until > (time.time() if now is None else now)
 
 
 class RealNameAuditor:
@@ -77,7 +88,7 @@ class RealNameAuditor:
                 await self.report_error("未实名成员续禁言扫描失败", exc)
 
     async def refresh_unverified_mutes(self) -> None:
-        """扫描招新群成员，并为未实名成员补充一轮禁言。"""
+        """扫描招新群成员，只给当前未禁言的未实名成员设置禁言。"""
 
         if not self.config.realname.enabled or not self.client.is_connected:
             return
@@ -96,12 +107,15 @@ class RealNameAuditor:
             # 管理员/群主不能被普通群禁言，跳过以免扫描日志反复报错。
             if str(member.get("role", "")).lower() in {"owner", "admin"}:
                 continue
+            if is_member_muted(member):
+                continue
             try:
                 await self.client.set_group_ban(
                     self.config.groups.recruit_group,
                     user_id,
                     self.config.realname.mute_duration_seconds,
                 )
+
             except Exception as exc:
                 print(f"[realname] failed to refresh mute for {user_id}: {exc}")
                 await self.report_error(
