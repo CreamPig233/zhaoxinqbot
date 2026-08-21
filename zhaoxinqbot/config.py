@@ -36,6 +36,14 @@ class GroupConfig:
 
 
 @dataclass(frozen=True)
+class ProhibitedWordsConfig:
+    """招新群违禁词屏蔽配置。"""
+
+    enabled: bool = True
+    words: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class AutoReviewConfig:
     """外部 Python 实名审核钩子的配置。"""
 
@@ -104,6 +112,7 @@ class BotConfig:
 
     napcat: NapCatConfig
     groups: GroupConfig
+    prohibited_words: ProhibitedWordsConfig
     realname: RealNameConfig
     message_archive: MessageArchiveConfig
     qa: QAConfig
@@ -200,6 +209,7 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
     secrets = load_secrets()
     napcat = raw.get("napcat", {}) or {}
     groups = raw.get("groups", {}) or {}
+    prohibited_words = raw.get("prohibited_words", {}) or {}
     realname = raw.get("realname", {}) or {}
     archive = raw.get("message_archive", {}) or {}
     qa = raw.get("qa", {}) or {}
@@ -220,6 +230,10 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
         groups=GroupConfig(
             recruit_group=int(groups.get("recruit_group", 810192062)),
             admin_group=int(groups.get("admin_group", 1065588188)),
+        ),
+        prohibited_words=ProhibitedWordsConfig(
+            enabled=bool(prohibited_words.get("enabled", True)),
+            words=tuple(str(x) for x in (prohibited_words.get("words", []) or []) if str(x)),
         ),
         realname=RealNameConfig(
             enabled=bool(realname.get("enabled", True)),

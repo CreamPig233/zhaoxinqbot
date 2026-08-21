@@ -13,7 +13,8 @@ from .errors import ErrorReporter
 from .messages import MessageArchive
 from .napcat import NapCatClient
 from .qa import QuestionAnswerer
-from .realname import RealNameAuditor, is_self_message
+from .prohibited_words import ProhibitedWordMatcher
+from .realname import RealNameAuditor, extract_text, is_self_message
 from .storage import JsonStore
 
 
@@ -30,6 +31,7 @@ class BotApp:
             self.config.napcat.send_message_delay_seconds,
         )
         self.error_reporter = ErrorReporter(self.client, self.config.groups.admin_group)
+        self.prohibited_words = ProhibitedWordMatcher(self.config.prohibited_words.words)
         self.archive = MessageArchive(
             self.store,
             self.client,
@@ -90,6 +92,16 @@ class BotApp:
             in_archive_scope = not archive_config.group_ids or group_id in archive_config.group_ids
             if archive_config.enabled and in_archive_scope:
                 await self.archive.record_group_message(event)
+            if (
+                self.config.prohibited_words.enabled
+                and int(group_id) == self.config.groups.recruit_group
+            ):
+                text = extract_text(event.get("message", event.get("raw_message", "")))
+                matched_word = self.prohibited_words.find(text)
+                if matched_word is not None:
+                    await self.client.delete_msg(event["message_id"])
+                    print(f"[prohibited_words] recalled message {event['message_id']} (matched {matched_word!r})")
+                    return
             await self.realname.on_admin_group_message(event)
             await self.qa.on_group_message(event)
             return
