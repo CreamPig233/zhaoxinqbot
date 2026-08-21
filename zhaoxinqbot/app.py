@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .config import load_config, load_strings
@@ -24,6 +25,7 @@ class BotApp:
     def __init__(self) -> None:
         self.config = load_config()
         self.strings = load_strings()
+        self.started_at = time.time()
         self.store = JsonStore(self.config.storage.data_dir)
         self.client = NapCatClient(
             self.config.napcat.ws_url,
@@ -95,6 +97,7 @@ class BotApp:
             if (
                 self.config.prohibited_words.enabled
                 and int(group_id) == self.config.groups.recruit_group
+                and is_new_message(event, self.started_at)
             ):
                 text = extract_text(event.get("message", event.get("raw_message", "")))
                 matched_word = self.prohibited_words.find(text)
@@ -126,3 +129,17 @@ async def main() -> None:
     """供 run_bot.py 调用的异步入口。"""
 
     await BotApp().run()
+
+
+def is_new_message(event: dict[str, Any], started_at: float) -> bool:
+    """Only allow message events created during this process run to be screened.
+
+    OneBot message events carry their creation timestamp in ``time``. Requiring
+    that timestamp prevents replayed/history messages from triggering recall.
+    """
+
+    try:
+        event_time = float(event["time"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return event_time >= started_at
