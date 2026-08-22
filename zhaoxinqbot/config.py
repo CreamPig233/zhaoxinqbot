@@ -127,6 +127,7 @@ class RealNameStrings:
     approve_command: str
     reject_command: str
     revoke_command: str
+    add_verified_command: str
     identity_format: str
     join_prompt: str
     verified_join_prompt: str
@@ -289,6 +290,7 @@ def load_strings(path: str | Path = "strings.yaml") -> BotStrings:
             approve_command=str(realname["approve_command"]),
             reject_command=str(realname["reject_command"]),
             revoke_command=str(realname["revoke_command"]),
+            add_verified_command=str(realname.get("add_verified_command", "添加实名")),
             identity_format=str(realname["identity_format"]),
             join_prompt=str(realname["join_prompt"]),
             verified_join_prompt=str(realname["verified_join_prompt"]),

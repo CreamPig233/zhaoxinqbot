@@ -217,38 +217,46 @@ class RealNameAuditor:
         identity: dict[str, str],
         text: str,
         event: dict[str, Any],
+        *,
+        response_channel: str = "private",
+        operator_id: int = 0,
     ) -> None:
         """在单用户锁内创建并推进一次实名申请，避免并发重复提交。"""
 
+        async def send_response(message: str) -> None:
+            if response_channel == "admin":
+                await self.safe_send_admin(message)
+            else:
+                await self.client.call("send_private_msg", user_id=user_id, message=message)
+
+        notify_user = response_channel != "admin"
+        result_to_admin = response_channel == "admin"
+        approve_mode = "admin_add" if response_channel == "admin" else "auto"
+
         data = self.store.load_realnames()
-        if str(user_id) in data.get("verified", {}):
-            await self.client.call(
-                "send_private_msg",
-                user_id=user_id,
-                message=self.strings.already_verified,
-            )
+        if await self.is_verified(user_id):
+            await send_response(self.strings.already_verified)
             return
 
         if self.get_active_application(data, user_id):
-            await self.client.call(
-                "send_private_msg",
-                user_id=user_id,
-                message=self.strings.duplicate_active_application,
-            )
+            await send_response(self.strings.duplicate_active_application)
             return
 
         if self.config.realname.one_qq_one_identity:
             duplicate = self.find_identity_owner(data, identity)
             if duplicate and duplicate != str(user_id):
-                await self.client.call("send_private_msg", user_id=user_id, message=self.strings.duplicate_identity)
+                await send_response(self.strings.duplicate_identity)
                 return
 
         application = self.create_application(user_id, identity, text, event)
+        application["response_channel"] = response_channel
+        if operator_id:
+            application["submitted_by"] = operator_id
         data.setdefault("applications", {})[application["application_id"]] = application
         data.setdefault("active_by_user", {})[str(user_id)] = application["application_id"]
         self.save_application_state(data, application, "auto_reviewing", "auto_reviewing")
         self.store.save_realnames(data)
-        await self.client.call("send_private_msg", user_id=user_id, message=self.strings.auto_reviewing)
+        await send_response(self.strings.auto_reviewing)
 
         decision, reason = await self.run_external_review(application)
         data = self.store.load_realnames()
@@ -259,15 +267,25 @@ class RealNameAuditor:
             return
 
         if decision == "approve":
-            await self.approve(user_id, 0, "auto", application["application_id"], reason)
+            await self.approve(
+                user_id,
+                operator_id,
+                approve_mode,
+                application["application_id"],
+                reason,
+                notify_user=notify_user,
+                result_to_admin=result_to_admin,
+            )
             return
         if decision == "reject":
             await self.reject(
                 user_id,
-                0,
-                "auto",
+                operator_id,
+                approve_mode,
                 reason or self.strings.auto_reject_reason,
                 application["application_id"],
+                notify_user=notify_user,
+                result_to_admin=result_to_admin,
             )
             return
 
@@ -278,7 +296,7 @@ class RealNameAuditor:
         }
         self.store.save_realnames(data)
         await self.notify_admins(user_id, identity, application["application_id"])
-        await self.safe_send_private(user_id, self.strings.manual_handoff)
+        await send_response(self.strings.manual_handoff)
 
     async def on_admin_group_message(self, event: dict[str, Any]) -> None:
         """处理管理群发出的批准、拒绝和取消实名命令。"""
@@ -290,9 +308,34 @@ class RealNameAuditor:
         if self.config.realname.admin_approvers and user_id not in self.config.realname.admin_approvers:
             return
 
-        text = extract_text(event.get("message", event.get("raw_message", ""))).strip()
+        message = event.get("message", event.get("raw_message", ""))
+        text = extract_text(message).strip()
         target = self.extract_reply_target(event)
         target_application_id = self.extract_reply_application_id(event)
+
+        if text.startswith(self.strings.add_verified_command):
+            if not has_at_self(event):
+                return
+            target_user, identity = self.parse_admin_add_identity(text)
+            if not target_user or not identity:
+                await self.safe_send_admin(
+                    f"格式不正确。请在管理群 @机器人 后发送：{self.strings.add_verified_command} QQ号 姓名 学号"
+                )
+                return
+            lock = self.get_application_lock(target_user)
+            if lock.locked():
+                await self.safe_send_admin(self.strings.duplicate_active_application)
+                return
+            async with lock:
+                await self.handle_realname_submission(
+                    target_user,
+                    identity,
+                    text,
+                    event,
+                    response_channel="admin",
+                    operator_id=user_id,
+                )
+            return
 
         if text.startswith(self.strings.approve_command):
             target_user = self.extract_user_arg(text) or target
@@ -343,6 +386,32 @@ class RealNameAuditor:
             return None
         return {"name": name, "id": identity_id}
 
+    def parse_admin_add_identity(self, text: str) -> tuple[int | None, dict[str, str] | None]:
+        """解析“添加实名 QQ号 姓名 学号”管理员代提交命令。"""
+
+        command = self.strings.add_verified_command.strip()
+        normalized = unicodedata.normalize("NFKC", text).strip()
+        normalized_command = unicodedata.normalize("NFKC", command)
+        if not normalized.startswith(normalized_command):
+            return None, None
+
+        content = normalized[len(normalized_command) :].strip()
+        parts = [part for part in IDENTITY_SEPARATOR_RE.split(content) if part]
+        if len(parts) != 3:
+            return None, None
+        qq, name_part, identity_part = parts
+        if not qq.isdigit():
+            return None, None
+        name = normalize_person_name(name_part)
+        identity_id = identity_part.strip().upper()
+        if (
+            not name
+            or not STUDENT_ID_RE.fullmatch(identity_id)
+            or not MIN_STUDENT_ID_LENGTH <= len(identity_id) <= MAX_STUDENT_ID_LENGTH
+        ):
+            return None, None
+        return int(qq), {"name": name, "id": identity_id}
+
     async def approve(
         self,
         target_user: int,
@@ -350,6 +419,9 @@ class RealNameAuditor:
         mode: str,
         application_id: str | None = None,
         reason: str = "",
+        *,
+        notify_user: bool = True,
+        result_to_admin: bool | None = None,
     ) -> None:
         """批准待审核申请，并解除招新群禁言。"""
 
@@ -361,6 +433,10 @@ class RealNameAuditor:
                 self.strings.no_pending.format(user_id=target_user),
             )
             return
+        if application.get("response_channel") == "admin":
+            notify_user = False
+            if result_to_admin is None:
+                result_to_admin = True
 
         data.get("pending", {}).pop(str(target_user), None)
         data.get("active_by_user", {}).pop(str(target_user), None)
@@ -378,8 +454,11 @@ class RealNameAuditor:
         except Exception as exc:
             unban_failed = f"；解除禁言失败：{exc}"
             await self.report_error("实名通过后解除禁言失败", exc, user_id=target_user)
-        await self.safe_send_private(target_user, self.strings.approved_user)
-        if mode == "manual":
+        if notify_user:
+            await self.safe_send_private(target_user, self.strings.approved_user)
+        if result_to_admin is None:
+            result_to_admin = mode == "manual"
+        if result_to_admin:
             await self.safe_send_admin(self.strings.approved_admin.format(user_id=target_user) + unban_failed)
 
     async def reject(
@@ -389,6 +468,9 @@ class RealNameAuditor:
         mode: str,
         reason: str,
         application_id: str | None = None,
+        *,
+        notify_user: bool = True,
+        result_to_admin: bool | None = None,
     ) -> None:
         """拒绝待审核申请，并允许用户重新提交。"""
 
@@ -400,6 +482,10 @@ class RealNameAuditor:
                 self.strings.no_pending.format(user_id=target_user),
             )
             return
+        if application.get("response_channel") == "admin":
+            notify_user = False
+            if result_to_admin is None:
+                result_to_admin = True
 
         data.get("pending", {}).pop(str(target_user), None)
         data.get("active_by_user", {}).pop(str(target_user), None)
@@ -412,15 +498,16 @@ class RealNameAuditor:
             "reason": reason,
         }
         self.store.save_realnames(data)
-        await self.safe_send_private(
-            target_user,
-            self.strings.rejected_user.format(
-                resubmit_prompt=self.strings.resubmit_prompt,
-                reason=reason,
-            ),
+        rejected_message = self.strings.rejected_user.format(
+            resubmit_prompt=self.strings.resubmit_prompt,
+            reason=reason,
         )
-        if mode == "manual":
-            await self.safe_send_admin(self.strings.rejected_admin.format(user_id=target_user))
+        if notify_user:
+            await self.safe_send_private(target_user, rejected_message)
+        if result_to_admin is None:
+            result_to_admin = mode == "manual"
+        if result_to_admin:
+            await self.safe_send_admin(f"{self.strings.rejected_admin.format(user_id=target_user)}\n原因：{reason}")
 
     async def revoke(self, target_user: int, operator_id: int, mode: str) -> None:
         """把已通过实名记录移入撤销分区。"""
@@ -747,6 +834,24 @@ def is_self_message(event: dict[str, Any]) -> bool:
     sender = event.get("sender") if isinstance(event.get("sender"), dict) else {}
     sender_id = sender.get("user_id")
     return str(user_id) == str(self_id) or str(sender_id) == str(self_id)
+
+
+def has_at_self(event: dict[str, Any]) -> bool:
+    """判断群消息是否 @ 了机器人。"""
+
+    self_id = event.get("self_id")
+    if self_id is None:
+        return False
+    message = event.get("message")
+    if not isinstance(message, list):
+        return False
+    for segment in message:
+        if not isinstance(segment, dict) or segment.get("type") != "at":
+            continue
+        qq = (segment.get("data") or {}).get("qq")
+        if str(qq) == str(self_id):
+            return True
+    return False
 
 
 def extract_reply_id(event: dict[str, Any]) -> Any:
