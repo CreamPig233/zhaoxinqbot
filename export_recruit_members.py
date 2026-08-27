@@ -25,10 +25,15 @@ STATUS_VERIFIED = "已实名"
 STATUS_UNVERIFIED = "未实名"
 STATUS_WHITELIST = "白名单"
 STATUS_OTHER = "其它"
+GROUP_STATUS_CURRENT = "当前在群"
+GROUP_STATUS_LEFT = "已退群"
+JOIN_TIME_TOLERANCE_SECONDS = 5.0
 
 BASE_HEADERS = ["序号", "QQ号", "个人昵称", "群名片"]
 JOIN_TIME_HEADER = "入群时间"
-TAIL_HEADERS = ["状态", "姓名", "学号"]
+LEAVE_TIME_HEADER = "退群时间"
+GROUP_STATUS_HEADER = "群状态"
+TAIL_HEADERS = ["实名状态", "姓名", "学号"]
 
 # These are the states used by RealNameAuditor for applications that have not
 # reached approval. Manual review is represented by ``manual_pending`` and
@@ -152,6 +157,11 @@ def _timestamp_value(value: Any) -> float | None:
     try:
         timestamp = float(value)
     except (TypeError, ValueError):
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value).timestamp()
+            except ValueError:
+                pass
         return None
     if timestamp <= 0:
         return None
@@ -160,8 +170,78 @@ def _timestamp_value(value: Any) -> float | None:
     return timestamp
 
 
+def _collapse_nearby_timestamps(timestamps: Iterable[float]) -> list[float]:
+    """Keep the first timestamp in each run whose adjacent gap is <= 5s."""
+
+    ordered = sorted(set(timestamps))
+    if not ordered:
+        return []
+    collapsed = [ordered[0]]
+    previous = ordered[0]
+    for timestamp in ordered[1:]:
+        if timestamp - previous > JOIN_TIME_TOLERANCE_SECONDS:
+            collapsed.append(timestamp)
+        previous = timestamp
+    return collapsed
+
+
+def load_membership_history(path: Path, group_id: int) -> dict[str, dict[str, list[float]]]:
+    """Load join/leave timestamps for the requested group from JSONL."""
+
+    history: dict[str, dict[str, list[float]]] = {}
+    if not path.exists():
+        return history
+
+    with path.open("r", encoding="utf-8") as source:
+        for line_number, line in enumerate(source, start=1):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"成员事件日志第 {line_number} 行不是有效 JSON: {path}") from exc
+            if not isinstance(event, dict):
+                continue
+            try:
+                event_group_id = int(event.get("group_id", 0))
+            except (TypeError, ValueError):
+                continue
+            if event_group_id != group_id:
+                continue
+            user_key = _as_user_key(event.get("user_id"))
+            if user_key is None:
+                continue
+            event_type = event.get("notice_type")
+            if event_type not in {"group_increase", "group_decrease"}:
+                continue
+            timestamp = _timestamp_value(event.get("event_time"))
+            if timestamp is None and isinstance(event.get("raw_event"), dict):
+                timestamp = _timestamp_value(event["raw_event"].get("time"))
+            if timestamp is None:
+                timestamp = _timestamp_value(event.get("recorded_at"))
+            if timestamp is None:
+                continue
+
+            item = history.setdefault(user_key, {"joined": [], "left": []})
+            bucket = "joined" if event_type == "group_increase" else "left"
+            if timestamp not in item[bucket]:
+                item[bucket].append(timestamp)
+
+    for item in history.values():
+        item["joined"] = _collapse_nearby_timestamps(item["joined"])
+        item["left"].sort()
+    return history
+
+
+def _history_time_texts(item: dict[str, list[float]] | None, key: str) -> str:
+    if not item:
+        return ""
+    values = [_timestamp_to_text(value) for value in item.get(key, [])]
+    return "；".join(value for value in values if value)
+
+
 def _members_by_qq(members: Iterable[Any]) -> list[dict[str, Any]]:
-    """Index members by QQ and sort them by join time ascending."""
+    """Index members by QQ and sort them by earliest join time ascending."""
 
     indexed: dict[str, dict[str, Any]] = {}
     for member in members:
@@ -171,7 +251,7 @@ def _members_by_qq(members: Iterable[Any]) -> list[dict[str, Any]]:
         if user_key is not None:
             indexed[user_key] = member
     def sort_key(item: dict[str, Any]) -> tuple[bool, float, int]:
-        timestamp = _timestamp_value(item.get("join_time"))
+        timestamp = _timestamp_value(item.get("_sort_join_time", item.get("join_time")))
         return timestamp is None, timestamp or 0, int(_as_user_key(item.get("user_id")) or 0)
 
     return sorted(indexed.values(), key=sort_key)
@@ -181,31 +261,67 @@ def build_csv_rows(
     members: Iterable[Any],
     realname_data: dict[str, Any],
     whitelist_users: Iterable[Any],
+    membership_history: dict[str, dict[str, list[float]]] | None = None,
 ) -> tuple[list[str], list[dict[str, str]]]:
-    """Build CSV headers and rows from NapCat member data."""
+    """Build CSV rows from current NapCat members and history."""
 
-    normalized_members = _members_by_qq(members)
-    has_join_time = any(_timestamp_to_text(member.get("join_time")) for member in normalized_members)
+    history = membership_history or {}
+    current_members = list(members)
+    current_user_keys = {
+        _as_user_key(member.get("user_id"))
+        for member in current_members
+        if isinstance(member, dict)
+    }
+    current_user_keys.discard(None)
+
+    indexed_members: dict[str, dict[str, Any]] = {}
+    for member in current_members:
+        if not isinstance(member, dict):
+            continue
+        user_key = _as_user_key(member.get("user_id"))
+        if user_key is not None:
+            indexed_members[user_key] = dict(member)
+    for user_key in history:
+        indexed_members.setdefault(user_key, {"user_id": user_key, "nickname": "", "card": ""})
+
+    for user_key, member in indexed_members.items():
+        item = history.setdefault(user_key, {"joined": [], "left": []})
+        current_join_time = _timestamp_value(member.get("join_time"))
+        if current_join_time is not None and current_join_time not in item["joined"]:
+            item["joined"].append(current_join_time)
+        item["joined"] = _collapse_nearby_timestamps(item["joined"])
+        member["_sort_join_time"] = item["joined"][0] if item["joined"] else None
+
+    normalized_members = _members_by_qq(indexed_members.values())
+    has_join_time = any(_history_time_texts(history.get(_as_user_key(member.get("user_id"))), "joined") for member in normalized_members)
+    has_leave_time = any(_history_time_texts(history.get(_as_user_key(member.get("user_id"))), "left") for member in normalized_members)
     headers = [*BASE_HEADERS]
     if has_join_time:
         headers.append(JOIN_TIME_HEADER)
+    if has_leave_time:
+        headers.append(LEAVE_TIME_HEADER)
+    headers.append(GROUP_STATUS_HEADER)
     headers.extend(TAIL_HEADERS)
 
     rows: list[dict[str, str]] = []
     for sequence, member in enumerate(normalized_members, start=1):
         user_id = _as_user_key(member.get("user_id")) or ""
         status, name, student_id = classify_member(user_id, realname_data, whitelist_users)
+        member_history = history.get(user_id)
         row = {
-            "序号": str(sequence),
-            "QQ号": user_id,
-            "个人昵称": str(member.get("nickname") or ""),
-            "群名片": str(member.get("card") or ""),
-            "状态": status,
-            "姓名": name if status == STATUS_VERIFIED else "",
-            "学号": student_id if status == STATUS_VERIFIED else "",
+            BASE_HEADERS[0]: str(sequence),
+            BASE_HEADERS[1]: user_id,
+            BASE_HEADERS[2]: str(member.get("nickname") or ""),
+            BASE_HEADERS[3]: str(member.get("card") or ""),
+            TAIL_HEADERS[1]: name if status == STATUS_VERIFIED else "",
+            TAIL_HEADERS[2]: student_id if status == STATUS_VERIFIED else "",
         }
+        row[TAIL_HEADERS[0]] = status
+        row[GROUP_STATUS_HEADER] = GROUP_STATUS_CURRENT if user_id in current_user_keys else GROUP_STATUS_LEFT
         if has_join_time:
-            row[JOIN_TIME_HEADER] = _timestamp_to_text(member.get("join_time"))
+            row[JOIN_TIME_HEADER] = _history_time_texts(member_history, "joined")
+        if has_leave_time:
+            row[LEAVE_TIME_HEADER] = _history_time_texts(member_history, "left")
         rows.append(row)
     return headers, rows
 
@@ -297,8 +413,10 @@ async def _run(args: argparse.Namespace) -> Path:
     if not isinstance(realname_data, dict):
         raise ValueError(f"实名数据文件必须是 JSON 对象: {realname_path}")
 
+    membership_path = data_dir / "membership_events.jsonl"
+    membership_history = load_membership_history(membership_path, group_id)
     members = await fetch_group_members(config.napcat.ws_url, access_token, group_id)
-    headers, rows = build_csv_rows(members, realname_data, whitelist_users)
+    headers, rows = build_csv_rows(members, realname_data, whitelist_users, membership_history)
     output = args.output or data_dir / "recruit_group_members.csv"
     if not output.is_absolute():
         output = Path.cwd() / output
