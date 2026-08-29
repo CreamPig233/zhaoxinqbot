@@ -57,6 +57,7 @@ class RealNameConfig:
     """实名认证流程的运行开关。"""
 
     enabled: bool = True
+    global_mute_enabled: bool = False
     one_qq_one_identity: bool = True
     mute_duration_seconds: int = 30 * 24 * 60 * 60
     mute_refresh_interval_seconds: int = 12 * 60 * 60
@@ -238,6 +239,7 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
         ),
         realname=RealNameConfig(
             enabled=bool(realname.get("enabled", True)),
+            global_mute_enabled=bool(realname.get("global_mute_enabled", False)),
             one_qq_one_identity=bool(realname.get("one_qq_one_identity", True)),
             mute_duration_seconds=int(realname.get("mute_duration_seconds", 30 * 24 * 60 * 60)),
             mute_refresh_interval_seconds=int(realname.get("mute_refresh_interval_seconds", 12 * 60 * 60)),

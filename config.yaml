@@ -34,6 +34,9 @@ realname:
   # 总开关：关闭后不再要求新成员实名，也不处理实名提交；成员进退日志仍会记录。
   enabled: true
 
+  # 总禁言开关：false 时不再新增任何禁言，但解除禁言仍正常执行。
+  global_mute_enabled: false
+
   # 开启后，一个实名信息只能绑定一个 QQ；会同时检查已通过和待审核记录。
   one_qq_one_identity: true
 

@@ -109,21 +109,22 @@ class RealNameAuditor:
                 continue
             if is_member_muted(member):
                 continue
-            try:
-                await self.client.set_group_ban(
-                    self.config.groups.recruit_group,
-                    user_id,
-                    self.config.realname.mute_duration_seconds,
-                )
+            if self.config.realname.global_mute_enabled:
+                try:
+                    await self.client.set_group_ban(
+                        self.config.groups.recruit_group,
+                        user_id,
+                        self.config.realname.mute_duration_seconds,
+                    )
 
-            except Exception as exc:
-                print(f"[realname] failed to refresh mute for {user_id}: {exc}")
-                await self.report_error(
-                    "未实名成员续禁言失败",
-                    exc,
-                    user_id=user_id,
-                    group_id=self.config.groups.recruit_group,
-                )
+                except Exception as exc:
+                    print(f"[realname] failed to refresh mute for {user_id}: {exc}")
+                    await self.report_error(
+                        "未实名成员续禁言失败",
+                        exc,
+                        user_id=user_id,
+                        group_id=self.config.groups.recruit_group,
+                    )
 
     async def on_member_change(self, event: dict[str, Any]) -> None:
         """记录入群/退群通知，并为新成员启动实名流程。"""
@@ -158,16 +159,17 @@ class RealNameAuditor:
             await self.send_rejoin_prompt(user_id)
             return
 
-        try:
-            await self.client.set_group_ban(
-                self.config.groups.recruit_group,
-                user_id,
-                self.config.realname.mute_duration_seconds,
-            )
-        except Exception as exc:
-            print(f"[realname] failed to mute new member {user_id}: {exc}")
-            await self.report_error("新成员禁言失败", exc, user_id=user_id, group_id=self.config.groups.recruit_group)
-            await self.safe_send_admin(f"新成员 {user_id} 入群后禁言失败，请管理员手动检查：{exc}")
+        if self.config.realname.global_mute_enabled:
+            try:
+                await self.client.set_group_ban(
+                    self.config.groups.recruit_group,
+                    user_id,
+                    self.config.realname.mute_duration_seconds,
+                )
+            except Exception as exc:
+                print(f"[realname] failed to mute new member {user_id}: {exc}")
+                await self.report_error("新成员禁言失败", exc, user_id=user_id, group_id=self.config.groups.recruit_group)
+                await self.safe_send_admin(f"新成员 {user_id} 入群后禁言失败，请管理员手动检查：{exc}")
         try:
             await self.client.send_group_msg(
                 self.config.groups.recruit_group,
