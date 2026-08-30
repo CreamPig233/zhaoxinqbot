@@ -1,4 +1,7 @@
-"""Authenticated remote identity verification service backed by users.csv."""
+"""Authenticated remote identity verification service backed by users.csv.
+
+这个脚本配合zhaoxinsurvey使用，负责接收来自zhaoxinsurvey的登录请求，验证QQ号和学号是否匹配，并返回实名信息。
+"""
 
 from __future__ import annotations
 

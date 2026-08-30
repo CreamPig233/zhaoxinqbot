@@ -2,6 +2,9 @@
 
 Run this script from the project root or directly by path.  The recruit group
 comes from ``config.yaml`` and the whitelist comes from ``.secrets``.
+
+
+这个脚本用来将实名信息导出为配合zhaoxinsurvey使用的csv文件。
 """
 
 from __future__ import annotations

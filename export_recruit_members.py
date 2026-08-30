@@ -2,7 +2,9 @@
 
 The script uses NapCat's OneBot 11 WebSocket action ``get_group_member_list``
 and the real-name state written by this project.  Run it from the repository
-root with ``python export_recruit_members.py``.
+root with ``python export_recruit_members.py``
+
+这个脚本用来将实名信息导出为可读性较好的csv。
 """
 
 from __future__ import annotations
