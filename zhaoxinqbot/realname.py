@@ -12,12 +12,14 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
 import importlib.util
 import inspect
 import re
 import time
 import unicodedata
 import uuid
+from pathlib import Path
 from typing import Any
 
 from .config import BotConfig, RealNameStrings
@@ -54,6 +56,41 @@ class RealNameAuditor:
         self.error_reporter = error_reporter
         self._application_locks: dict[int, asyncio.Lock] = {}
         self._mute_refresh_task: asyncio.Task[None] | None = None
+        self._member_export_lock = asyncio.Lock()
+        self._member_export_module: Any | None = None
+
+    async def export_members_incremental(self) -> None:
+        """Refresh the recruit-group real-name member CSV after state changes."""
+
+        if not self.config.realname.incremental_member_export_enabled:
+            return
+
+        project_root = Path(__file__).resolve().parent.parent
+        script_path = project_root / "export_realname_members_incremental.py"
+        if not script_path.is_file():
+            return
+
+        async with self._member_export_lock:
+            try:
+                if self._member_export_module is None:
+                    spec = importlib.util.spec_from_file_location(
+                        "zhaoxinqbot_incremental_member_export",
+                        script_path,
+                    )
+                    if spec is None or spec.loader is None:
+                        raise ImportError(f"cannot load export script: {script_path}")
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    self._member_export_module = module
+                await self._member_export_module._run(
+                    argparse.Namespace(
+                        config=project_root / "config.yaml",
+                        output=None,
+                    )
+                )
+            except Exception as exc:
+                print(f"[realname] failed to export incremental member CSV: {exc}")
+                await self.report_error("实名成员 CSV 增量导出失败", exc)
 
     def start_mute_refresh(self) -> asyncio.Task[None]:
         """启动未实名成员的周期性续禁言任务。"""
@@ -146,10 +183,12 @@ class RealNameAuditor:
                 "raw_event": event,
             },
         )
-
         if event.get("notice_type") == "group_decrease":
-            self.cancel_active_application_for_leave(int(event.get("user_id", 0)))
+            await self.cancel_active_application_for_leave(int(event.get("user_id", 0)))
+            await self.export_members_incremental()
             return
+
+        await self.export_members_incremental()
 
         if event.get("notice_type") != "group_increase" or not self.config.realname.enabled:
             return
@@ -258,6 +297,7 @@ class RealNameAuditor:
         data.setdefault("active_by_user", {})[str(user_id)] = application["application_id"]
         self.save_application_state(data, application, "auto_reviewing", "auto_reviewing")
         self.store.save_realnames(data)
+        await self.export_members_incremental()
         await send_response(self.strings.auto_reviewing)
 
         decision, reason = await self.run_external_review(application)
@@ -297,6 +337,7 @@ class RealNameAuditor:
             "identity": identity,
         }
         self.store.save_realnames(data)
+        await self.export_members_incremental()
         await self.notify_admins(user_id, identity, application["application_id"])
         await send_response(self.strings.manual_handoff)
 
@@ -450,6 +491,7 @@ class RealNameAuditor:
             "approve_mode": mode,
         }
         self.store.save_realnames(data)
+        await self.export_members_incremental()
         unban_failed = ""
         try:
             await self.client.set_group_ban(self.config.groups.recruit_group, target_user, 0)
@@ -500,6 +542,7 @@ class RealNameAuditor:
             "reason": reason,
         }
         self.store.save_realnames(data)
+        await self.export_members_incremental()
         rejected_message = self.strings.rejected_user.format(
             resubmit_prompt=self.strings.resubmit_prompt,
             reason=reason,
@@ -529,6 +572,7 @@ class RealNameAuditor:
             "revoke_mode": mode,
         }
         self.store.save_realnames(data)
+        await self.export_members_incremental()
         await self.client.send_group_msg(
             self.config.groups.admin_group,
             self.strings.revoked_admin.format(user_id=target_user),
@@ -669,7 +713,7 @@ class RealNameAuditor:
             self._application_locks[user_id] = lock
         return lock
 
-    def cancel_active_application_for_leave(self, user_id: int) -> None:
+    async def cancel_active_application_for_leave(self, user_id: int) -> None:
         """用户退群时取消仍在处理中的实名申请。"""
 
         if not user_id:

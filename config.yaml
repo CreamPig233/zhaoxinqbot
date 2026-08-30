@@ -37,6 +37,9 @@ realname:
   # 总禁言开关：false 时不再新增任何禁言，但解除禁言仍正常执行。
   global_mute_enabled: false
 
+  # 实名成员 CSV 增量导出开关，配合 zhaoxinsurvey 使用。
+  incremental_member_export_enabled: true
+
   # 开启后，一个实名信息只能绑定一个 QQ；会同时检查已通过和待审核记录。
   one_qq_one_identity: true
 
