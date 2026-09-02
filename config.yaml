@@ -34,6 +34,9 @@ realname:
   # 总开关：关闭后不再要求新成员实名，也不处理实名提交；成员进退日志仍会记录。
   enabled: true
 
+  # 入群提示开关：关闭后不在招新群 @ 新成员发送实名/欢迎提示；其他功能仍正常运行。
+  join_prompt_enabled: false
+
   # 总禁言开关：false 时不再新增任何禁言，但解除禁言仍正常执行。
   global_mute_enabled: false
 

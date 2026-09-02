@@ -57,6 +57,7 @@ class RealNameConfig:
     """实名认证流程的运行开关。"""
 
     enabled: bool = True
+    join_prompt_enabled: bool = True
     global_mute_enabled: bool = False
     incremental_member_export_enabled: bool = True
     one_qq_one_identity: bool = True
@@ -240,6 +241,7 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
         ),
         realname=RealNameConfig(
             enabled=bool(realname.get("enabled", True)),
+            join_prompt_enabled=bool(realname.get("join_prompt_enabled", True)),
             global_mute_enabled=bool(realname.get("global_mute_enabled", False)),
             incremental_member_export_enabled=bool(realname.get("incremental_member_export_enabled", True)),
             one_qq_one_identity=bool(realname.get("one_qq_one_identity", True)),
