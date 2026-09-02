@@ -195,7 +195,8 @@ class RealNameAuditor:
 
         user_id = int(event.get("user_id"))
         if await self.is_verified(user_id):
-            await self.send_rejoin_prompt(user_id)
+            if self.config.realname.join_prompt_enabled:
+                await self.send_rejoin_prompt(user_id)
             return
 
         if self.config.realname.global_mute_enabled:
@@ -209,6 +210,8 @@ class RealNameAuditor:
                 print(f"[realname] failed to mute new member {user_id}: {exc}")
                 await self.report_error("新成员禁言失败", exc, user_id=user_id, group_id=self.config.groups.recruit_group)
                 await self.safe_send_admin(f"新成员 {user_id} 入群后禁言失败，请管理员手动检查：{exc}")
+        if not self.config.realname.join_prompt_enabled:
+            return
         try:
             await self.client.send_group_msg(
                 self.config.groups.recruit_group,
