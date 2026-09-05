@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import argparse
+import copy
 import importlib.util
 import inspect
 import re
@@ -324,8 +325,19 @@ class RealNameAuditor:
         if application.get("status") != "auto_reviewing":
             return
 
+        application_identity = application.get("identity")
+        if (
+            not isinstance(application_identity, dict)
+            or not application_identity.get("name")
+            or not application_identity.get("id")
+        ):
+            # The submitted identity has already passed parse_identity(); use
+            # it to repair malformed state instead of persisting an empty one.
+            application_identity = dict(identity)
+            application["identity"] = application_identity
+
         if review_data.get("college"):
-            application.setdefault("identity", {})["college"] = normalize_college(review_data["college"])
+            application_identity["college"] = normalize_college(review_data["college"])
             self.store.save_realnames(data)
 
         if decision == "approve":
@@ -500,6 +512,18 @@ class RealNameAuditor:
             notify_user = False
             if result_to_admin is None:
                 result_to_admin = True
+
+        # Keep the identity snapshot complete when moving the application to
+        # ``verified``.  In particular, the external reviewer may have added
+        # ``college`` to the application identity; copy that value explicitly
+        # so it cannot be lost while building the final record.
+        identity = application.get("identity")
+        if not isinstance(identity, dict):
+            identity = {}
+        else:
+            identity = dict(identity)
+        identity["college"] = normalize_college(str(identity.get("college", "") or "").strip())
+        application["identity"] = identity
 
         data.get("pending", {}).pop(str(target_user), None)
         data.get("active_by_user", {}).pop(str(target_user), None)
@@ -761,7 +785,9 @@ class RealNameAuditor:
         return {
             "application_id": uuid.uuid4().hex,
             "user_id": user_id,
-            "identity": identity,
+            # The caller and external reviewer must not share mutable identity
+            # state with the record that will be persisted.
+            "identity": dict(identity),
             "raw_text": raw_text,
             "source_event": event,
             "created_at": now,
@@ -834,10 +860,11 @@ class RealNameAuditor:
 
         async def call_reviewer() -> Any:
             reviewer = self.load_external_reviewer()
+            reviewer_application = copy.deepcopy(application)
             if inspect.iscoroutinefunction(reviewer):
-                result = await reviewer(application)
+                result = await reviewer(reviewer_application)
             else:
-                result = await asyncio.to_thread(reviewer, application)
+                result = await asyncio.to_thread(reviewer, reviewer_application)
             return result
 
         try:
