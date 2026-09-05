@@ -43,6 +43,7 @@
 - `"reject"` 或 `"拒绝"`
 - `"timeout"` 或 `"超时"`
 - `{"status": "reject", "reason": "原因"}`
+- `{"status": "approve", "reason": "名单匹配", "college": "学院名称"}`：自动审核通过时可返回学院；机器人仅接受并保存 `college` 这一扩展字段。
 
 实名认证状态会保存在 `data/realname.json`，包括：
 
@@ -55,6 +56,19 @@
 - `review_messages`：管理群审核通知消息 ID 与用户 QQ 的映射
 
 每一次申请的状态变化还会追加写入 `data/realname_applications.jsonl`，其中包含申请 ID、发起用户、发起时间、提交的实名信息、状态、是否通过、状态说明等字段，方便审计和后续统计。
+
+学校接口审核返回的学院会写入申请的 `identity.college`，并随通过、拒绝或转人工状态一同保留。学院不由用户输入。
+
+已有已通过记录可以通过 `migrate_realname_colleges.py` 手工回填学院：
+
+```powershell
+python migrate_realname_colleges.py export
+# 编辑 data/realname_college_backfill.csv 的“学院”列。
+python migrate_realname_colleges.py import --dry-run
+python migrate_realname_colleges.py import
+```
+
+导入会校验 QQ 号、申请 ID、姓名和学号，仅回写非空学院，并自动备份 `data/realname.json`。
 
 当前保留的扩展点：
 

@@ -4,3 +4,4 @@ data/
 .secrets
 NapCatDocs/
 realname_reviewer.py
+migrate_realname_colleges.py

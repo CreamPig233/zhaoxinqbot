@@ -28,6 +28,18 @@ from .napcat import NapCatClient
 from .storage import JsonStore, utc_now_iso
 
 
+LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+NORMALIZED_MEDICAL_COLLEGE = "医学与生物信息工程学院"
+
+
+def normalize_college(college: str) -> str:
+    """统一历史学院名称。"""
+
+    if college == LEGACY_MEDICAL_COLLEGE:
+        return NORMALIZED_MEDICAL_COLLEGE
+    return college
+
+
 def is_member_muted(member: dict[str, Any], now: float | None = None) -> bool:
     """Return whether a member's OneBot mute expiry is still in the future."""
 
@@ -300,13 +312,17 @@ class RealNameAuditor:
         await self.export_members_incremental()
         await send_response(self.strings.auto_reviewing)
 
-        decision, reason = await self.run_external_review(application)
+        decision, reason, review_data = await self.run_external_review(application)
         data = self.store.load_realnames()
         application = data.get("applications", {}).get(application["application_id"])
         if not application:
             return
         if application.get("status") != "auto_reviewing":
             return
+
+        if review_data.get("college"):
+            application.setdefault("identity", {})["college"] = normalize_college(review_data["college"])
+            self.store.save_realnames(data)
 
         if decision == "approve":
             await self.approve(
@@ -334,7 +350,7 @@ class RealNameAuditor:
         self.save_application_state(data, application, "manual_pending", reason or self.strings.auto_timeout_reason)
         data.setdefault("pending", {})[str(user_id)] = {
             **application,
-            "identity": identity,
+            "identity": application.get("identity", identity),
         }
         self.store.save_realnames(data)
         await self.export_members_incremental()
@@ -809,7 +825,7 @@ class RealNameAuditor:
                 return application
         return None
 
-    async def run_external_review(self, application: dict[str, Any]) -> tuple[str, str]:
+    async def run_external_review(self, application: dict[str, Any]) -> tuple[str, str, dict[str, str]]:
         """调用配置的外部 Python 审核文件，并规范化返回值。"""
 
         async def call_reviewer() -> Any:
@@ -826,10 +842,10 @@ class RealNameAuditor:
                 timeout=self.config.realname.auto_review.timeout_seconds,
             )
         except asyncio.TimeoutError:
-            return "timeout", self.strings.auto_timeout_reason
+            return "timeout", self.strings.auto_timeout_reason, {}
         except Exception as exc:
             await self.report_error("外部实名审核异常", exc, application_id=application.get("application_id"))
-            return "timeout", self.strings.auto_exception_reason.format(error=exc)
+            return "timeout", self.strings.auto_exception_reason.format(error=exc), {}
         return normalize_review_result(result, self.strings.auto_unknown_reason)
 
     def load_external_reviewer(self) -> Any:
@@ -922,14 +938,18 @@ def strip_command_and_user(text: str, command: str) -> str:
     return rest
 
 
-def normalize_review_result(result: Any, unknown_reason_template: str) -> tuple[str, str]:
-    """把外部审核返回值规范化为内部状态码和原因。"""
+def normalize_review_result(result: Any, unknown_reason_template: str) -> tuple[str, str, dict[str, str]]:
+    """把外部审核返回值规范化为内部状态码、原因和可信扩展字段。"""
 
     reason = ""
     status = result
+    review_data: dict[str, str] = {}
     if isinstance(result, dict):
         status = result.get("status") or result.get("result") or result.get("decision")
         reason = str(result.get("reason") or result.get("message") or "")
+        college = normalize_college(str(result.get("college") or "").strip())
+        if college:
+            review_data["college"] = college
     elif isinstance(result, (tuple, list)) and result:
         status = result[0]
         if len(result) > 1:
@@ -951,7 +971,7 @@ def normalize_review_result(result: Any, unknown_reason_template: str) -> tuple[
         "timed_out": "timeout",
         "超时": "timeout",
     }
-    return mapping.get(normalized, "timeout"), reason or unknown_reason_template.format(status=status)
+    return mapping.get(normalized, "timeout"), reason or unknown_reason_template.format(status=status), review_data
 
 
 def normalize_person_name(name: str) -> str:

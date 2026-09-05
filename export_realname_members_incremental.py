@@ -25,7 +25,18 @@ from zhaoxinqbot.config import load_yaml
 QQ_HEADER = "QQ号"
 STUDENT_ID_HEADER = "学号"
 NAME_HEADER = "姓名"
-CSV_HEADERS = [QQ_HEADER, STUDENT_ID_HEADER, NAME_HEADER]
+COLLEGE_HEADER = "学院"
+GROUP_CARD_HEADER = "QQ群名片"
+REQUIRED_CSV_HEADERS = [QQ_HEADER, STUDENT_ID_HEADER, NAME_HEADER]
+CSV_HEADERS = [*REQUIRED_CSV_HEADERS, COLLEGE_HEADER, GROUP_CARD_HEADER]
+LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+NORMALIZED_MEDICAL_COLLEGE = "医学与生物信息工程学院"
+
+
+def normalize_college(college: str) -> str:
+    if college == LEGACY_MEDICAL_COLLEGE:
+        return NORMALIZED_MEDICAL_COLLEGE
+    return college
 
 
 def _as_user_key(value: Any) -> str | None:
@@ -37,33 +48,37 @@ def _as_user_key(value: Any) -> str | None:
     return text if text.isdigit() and text != "0" else None
 
 
-def _verified_identity(realname_data: dict[str, Any], user_key: str) -> tuple[str, str]:
+def _verified_identity(realname_data: dict[str, Any], user_key: str) -> tuple[str, str, str]:
     verified = realname_data.get("verified")
     if not isinstance(verified, dict) or user_key not in verified:
-        return "", ""
+        return "", "", ""
     record = verified[user_key]
     if not isinstance(record, dict):
-        return "", ""
+        return "", "", ""
     identity = record.get("identity")
     if not isinstance(identity, dict):
         identity = record
-    return str(identity.get("id", identity.get("student_id", "")) or ""), str(identity.get("name", "") or "")
+    return (
+        str(identity.get("id", identity.get("student_id", "")) or ""),
+        str(identity.get("name", "") or ""),
+        normalize_college(str(identity.get("college", "") or "")),
+    )
 
 
 def identity_for_user(
     user_id: Any,
     realname_data: dict[str, Any],
     whitelist_users: Iterable[Any],
-) -> tuple[str, str]:
-    """Return the CSV ``(student_id, name)`` for a QQ number."""
+) -> tuple[str, str, str]:
+    """Return the CSV ``(student_id, name, college)`` for a QQ number."""
 
     user_key = _as_user_key(user_id)
     if user_key is None:
-        return "", ""
+        return "", "", ""
     whitelist = {_as_user_key(item) for item in whitelist_users}
     whitelist.discard(None)
     if user_key in whitelist:
-        return user_key[:4], f"管理员{user_key}"
+        return user_key[:4], f"管理员{user_key}", ""
     return _verified_identity(realname_data, user_key)
 
 
@@ -82,7 +97,7 @@ def read_existing_csv(path: Path) -> dict[str, dict[str, str]]:
         return {}
     with path.open("r", encoding="utf-8-sig", newline="") as source:
         reader = csv.DictReader(source)
-        if reader.fieldnames is None or not set(CSV_HEADERS).issubset(reader.fieldnames):
+        if reader.fieldnames is None or not set(REQUIRED_CSV_HEADERS).issubset(reader.fieldnames):
             raise ValueError(f"CSV 缺少必要表头（需要 QQ号、学号、姓名）: {path}")
         rows: dict[str, dict[str, str]] = {}
         for row in reader:
@@ -95,6 +110,8 @@ def read_existing_csv(path: Path) -> dict[str, dict[str, str]]:
                     QQ_HEADER: user_key,
                     STUDENT_ID_HEADER: str(row.get(STUDENT_ID_HEADER) or ""),
                     NAME_HEADER: str(row.get(NAME_HEADER) or ""),
+                    COLLEGE_HEADER: normalize_college(str(row.get(COLLEGE_HEADER) or "")),
+                    GROUP_CARD_HEADER: str(row.get(GROUP_CARD_HEADER) or ""),
                 },
             )
         return rows
@@ -110,6 +127,7 @@ def merge_rows(
 
     current_keys: list[str] = []
     current_key_set: set[str] = set()
+    current_cards: dict[str, str] = {}
     for member in current_members:
         if not isinstance(member, dict):
             continue
@@ -117,16 +135,27 @@ def merge_rows(
         if user_key is not None and user_key not in current_key_set:
             current_keys.append(user_key)
             current_key_set.add(user_key)
+        if user_key is not None:
+            current_cards[user_key] = str(member.get("card") or "")
 
     result: list[dict[str, str]] = []
     handled: set[str] = set()
 
-    # Preserve existing order. Current users are refreshed from real-name data;
-    # departed verified users are retained exactly as they were exported.
+    # Preserve existing order. Current users are refreshed from real-name data
+    # and their live group cards; departed verified users are retained exactly
+    # as they were exported.
     for user_key, old_row in existing_rows.items():
         if user_key in current_key_set:
-            student_id, name = identity_for_user(user_key, realname_data, whitelist_users)
-            result.append({QQ_HEADER: user_key, STUDENT_ID_HEADER: student_id, NAME_HEADER: name})
+            student_id, name, college = identity_for_user(user_key, realname_data, whitelist_users)
+            result.append(
+                {
+                    QQ_HEADER: user_key,
+                    STUDENT_ID_HEADER: student_id,
+                    NAME_HEADER: name,
+                    COLLEGE_HEADER: college,
+                    GROUP_CARD_HEADER: current_cards[user_key],
+                }
+            )
         elif _row_is_verified(old_row):
             result.append({column: old_row.get(column, "") for column in CSV_HEADERS})
         handled.add(user_key)
@@ -135,8 +164,16 @@ def merge_rows(
     for user_key in current_keys:
         if user_key in handled:
             continue
-        student_id, name = identity_for_user(user_key, realname_data, whitelist_users)
-        result.append({QQ_HEADER: user_key, STUDENT_ID_HEADER: student_id, NAME_HEADER: name})
+        student_id, name, college = identity_for_user(user_key, realname_data, whitelist_users)
+        result.append(
+            {
+                QQ_HEADER: user_key,
+                STUDENT_ID_HEADER: student_id,
+                NAME_HEADER: name,
+                COLLEGE_HEADER: college,
+                GROUP_CARD_HEADER: current_cards[user_key],
+            }
+        )
     return result
 
 

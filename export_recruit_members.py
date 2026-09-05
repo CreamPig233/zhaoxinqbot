@@ -35,7 +35,15 @@ BASE_HEADERS = ["序号", "QQ号", "个人昵称", "群名片"]
 JOIN_TIME_HEADER = "入群时间"
 LEAVE_TIME_HEADER = "退群时间"
 GROUP_STATUS_HEADER = "群状态"
-TAIL_HEADERS = ["实名状态", "姓名", "学号"]
+TAIL_HEADERS = ["实名状态", "姓名", "学号", "学院"]
+LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+NORMALIZED_MEDICAL_COLLEGE = "医学与生物信息工程学院"
+
+
+def normalize_college(college: str) -> str:
+    if college == LEGACY_MEDICAL_COLLEGE:
+        return NORMALIZED_MEDICAL_COLLEGE
+    return college
 
 # These are the states used by RealNameAuditor for applications that have not
 # reached approval. Manual review is represented by ``manual_pending`` and
@@ -89,23 +97,24 @@ def _has_unverified_record(realname_data: dict[str, Any], user_key: str) -> bool
     return False
 
 
-def _identity_from_verified_record(record: Any) -> tuple[str, str]:
+def _identity_from_verified_record(record: Any) -> tuple[str, str, str]:
     if not isinstance(record, dict):
-        return "", ""
+        return "", "", ""
     identity = record.get("identity")
     if not isinstance(identity, dict):
         identity = record
     name = identity.get("name", "")
     student_id = identity.get("id", identity.get("student_id", ""))
-    return str(name or ""), str(student_id or "")
+    college = normalize_college(str(identity.get("college", "") or ""))
+    return str(name or ""), str(student_id or ""), college
 
 
 def classify_member(
     user_id: Any,
     realname_data: dict[str, Any],
     whitelist_users: Iterable[Any],
-) -> tuple[str, str, str]:
-    """Return ``(status, name, student_id)`` for one group member.
+) -> tuple[str, str, str, str]:
+    """Return ``(status, name, student_id, college)`` for one group member.
 
     Whitelist membership is deliberately checked before ``verified`` so the
     CSV retains the distinction requested by the operator.  Any known
@@ -117,26 +126,26 @@ def classify_member(
 
     user_key = _as_user_key(user_id)
     if user_key is None:
-        return STATUS_OTHER, "", ""
+        return STATUS_OTHER, "", "", ""
 
     whitelist = {_as_user_key(item) for item in whitelist_users}
     whitelist.discard(None)
     if user_key in whitelist:
-        return STATUS_WHITELIST, "", ""
+        return STATUS_WHITELIST, "", "", ""
 
     verified = realname_data.get("verified")
     if _mapping_has_user(verified, user_key):
-        name, student_id = _identity_from_verified_record(verified[user_key])
-        return STATUS_VERIFIED, name, student_id
+        name, student_id, college = _identity_from_verified_record(verified[user_key])
+        return STATUS_VERIFIED, name, student_id, college
 
     if _has_unverified_record(realname_data, user_key):
-        return STATUS_UNVERIFIED, "", ""
+        return STATUS_UNVERIFIED, "", "", ""
 
     # No verified record means the member has not completed this bot's
     # real-name flow.  This includes newly joined members with no application.
     # A group member without a successful record has not completed the
     # real-name flow, even when they have not submitted an application yet.
-    return STATUS_UNVERIFIED, "", ""
+    return STATUS_UNVERIFIED, "", "", ""
 
 
 def _timestamp_to_text(value: Any) -> str:
@@ -308,7 +317,7 @@ def build_csv_rows(
     rows: list[dict[str, str]] = []
     for sequence, member in enumerate(normalized_members, start=1):
         user_id = _as_user_key(member.get("user_id")) or ""
-        status, name, student_id = classify_member(user_id, realname_data, whitelist_users)
+        status, name, student_id, college = classify_member(user_id, realname_data, whitelist_users)
         member_history = history.get(user_id)
         row = {
             BASE_HEADERS[0]: str(sequence),
@@ -317,6 +326,7 @@ def build_csv_rows(
             BASE_HEADERS[3]: str(member.get("card") or ""),
             TAIL_HEADERS[1]: name if status == STATUS_VERIFIED else "",
             TAIL_HEADERS[2]: student_id if status == STATUS_VERIFIED else "",
+            TAIL_HEADERS[3]: college if status == STATUS_VERIFIED else "",
         }
         row[TAIL_HEADERS[0]] = status
         row[GROUP_STATUS_HEADER] = GROUP_STATUS_CURRENT if user_id in current_user_keys else GROUP_STATUS_LEFT

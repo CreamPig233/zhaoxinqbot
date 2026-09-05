@@ -8,7 +8,7 @@
 realname_reviewer.py 已加入 .gitignore，适合放置本地名单、接口密钥或临时审核逻辑。
 """
 
-
+from typing import Any
 
 
 def review_application(application: dict[str, Any]) -> dict[str, str]:
@@ -20,12 +20,12 @@ def review_application(application: dict[str, Any]) -> dict[str, str]:
     - id：学号（可能包含字母，长度不固定）
 
     可返回的形式包括：
-    - {"status": "approve", "reason": "名单匹配"}
+    - {"status": "approve", "reason": "名单匹配", "college": "学院名称"}
     - {"status": "reject", "reason": "学号不存在"}
     - {"status": "timeout", "reason": "移交人工审核"}
     """
     
-    # return {"status": "approve", "reason": "成功原因"} # 实名自动核验成功
+    # return {"status": "approve", "reason": "成功原因", "college": "学院名称"} # 实名自动核验成功
     # return {"status": "reject", "reason": "失败原因"} # 实名自动核验失败
     # return {"status": "timeout", "reason": "异常原因"} # 实名自动核验异常，移交人工审核
     
