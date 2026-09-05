@@ -37,11 +37,12 @@ LEAVE_TIME_HEADER = "退群时间"
 GROUP_STATUS_HEADER = "群状态"
 TAIL_HEADERS = ["实名状态", "姓名", "学号", "学院"]
 LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+LEGACY_MEDICAL_COLLEGE_ALT = "医学与生物信息工程学院（中荷生物医学与信息工程学院）"
 NORMALIZED_MEDICAL_COLLEGE = "医学与生物信息工程学院"
 
 
 def normalize_college(college: str) -> str:
-    if college == LEGACY_MEDICAL_COLLEGE:
+    if college in {LEGACY_MEDICAL_COLLEGE, LEGACY_MEDICAL_COLLEGE_ALT}:
         return NORMALIZED_MEDICAL_COLLEGE
     return college
 

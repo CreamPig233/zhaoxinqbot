@@ -29,13 +29,14 @@ from .storage import JsonStore, utc_now_iso
 
 
 LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+LEGACY_MEDICAL_COLLEGE_ALT = "医学与生物信息工程学院（中荷生物医学与信息工程学院）"
 NORMALIZED_MEDICAL_COLLEGE = "医学与生物信息工程学院"
 
 
 def normalize_college(college: str) -> str:
     """统一历史学院名称。"""
 
-    if college == LEGACY_MEDICAL_COLLEGE:
+    if college in {LEGACY_MEDICAL_COLLEGE, LEGACY_MEDICAL_COLLEGE_ALT}:
         return NORMALIZED_MEDICAL_COLLEGE
     return college
 

@@ -30,11 +30,12 @@ GROUP_CARD_HEADER = "QQ群名片"
 REQUIRED_CSV_HEADERS = [QQ_HEADER, STUDENT_ID_HEADER, NAME_HEADER]
 CSV_HEADERS = [*REQUIRED_CSV_HEADERS, COLLEGE_HEADER, GROUP_CARD_HEADER]
 LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+LEGACY_MEDICAL_COLLEGE_ALT = "医学与生物信息工程学院（中荷生物医学与信息工程学院）"
 NORMALIZED_MEDICAL_COLLEGE = "医学与生物信息工程学院"
 
 
 def normalize_college(college: str) -> str:
-    if college == LEGACY_MEDICAL_COLLEGE:
+    if college in {LEGACY_MEDICAL_COLLEGE, LEGACY_MEDICAL_COLLEGE_ALT}:
         return NORMALIZED_MEDICAL_COLLEGE
     return college
 
