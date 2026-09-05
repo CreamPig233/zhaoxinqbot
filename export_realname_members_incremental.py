@@ -137,7 +137,10 @@ def merge_rows(
             current_keys.append(user_key)
             current_key_set.add(user_key)
         if user_key is not None:
-            current_cards[user_key] = str(member.get("card") or "")
+            card = str(member.get("card") or "").strip()
+            if not card:
+                card = str(member.get("nickname") or "").strip()
+            current_cards[user_key] = card
 
     result: list[dict[str, str]] = []
     handled: set[str] = set()
